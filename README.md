@@ -15,15 +15,7 @@
 - Проектная работа
 
 ## 📁 Структура репозитория
-
-```
-├── hw01_homework-name/   # Домашнее задание 1
-├── hw02_homework-name/   # Домашнее задание 2
-├── hw03_homework-name/   # Домашнее задание 3
-├── ...
-├── final-project/        # Итоговый проект
-└── README.md             # Описание репозитория
-```
+-  **1** [Область применения и первое представление ClickHouse](hw01_clickhouse-adaptation)
 
 ## 🎯 Цели обучения
 
@@ -71,15 +63,7 @@ This repository contains completed homework assignments and projects for the ["C
 - Project work
 
 ## 📁 Repository Structure
-
-```
-├── hw01_homework-name/   # Homework Assignment 1
-├── hw02_homework-name/   # Homework Assignment 2
-├── hw03_homework-name/   # Homework Assignment 3
-├── ...
-├── final-project/        # Final Project
-└── README.md             # Repository Description
-```
+-  **1** [Scope of application and initial overview of ClickHouse](hw01_clickhouse-adaptation)
 
 ## 🎯 Learning Objectives
 
