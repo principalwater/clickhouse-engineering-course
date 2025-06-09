@@ -15,7 +15,7 @@
 - Проектная работа
 
 ## 📁 Структура репозитория
--  **1** [Область применения и первое представление ClickHouse](hw01_clickhouse-adaptation)
+1) [Область применения и первое представление ClickHouse](./hw01_clickhouse-adaptation/hw01.md)
 
 ## 🎯 Цели обучения
 
@@ -63,7 +63,7 @@ This repository contains completed homework assignments and projects for the ["C
 - Project work
 
 ## 📁 Repository Structure
--  **1** [Scope of application and initial overview of ClickHouse](hw01_clickhouse-adaptation)
+1) [Scope of application and initial overview of ClickHouse](./hw01_clickhouse-adaptation/hw01.md)
 
 ## 🎯 Learning Objectives
 
