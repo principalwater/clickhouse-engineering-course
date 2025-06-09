@@ -1,0 +1,29 @@
+# MacOS system files
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+.Spotlight-V100
+.Trashes
+.fseventsd
+.TemporaryItems
+.DocumentRevisions-V100
+.com.apple.timemachine.donotpresent
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Terraform (если используете)
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+crash.log
+*.tfvars
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
