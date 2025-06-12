@@ -252,6 +252,12 @@ resource "docker_container" "ch_nodes" {
 }
 
 # 9. Генерируем .env файл для скриптов (env/clickhouse.env)
+resource "null_resource" "mk_env_dir" {
+  provisioner "local-exec" {
+    command = "mkdir -p ${path.root}/../env"
+  }
+}
+
 resource "local_file" "env_file" {
   content = <<EOT
 CH_USER=${local.super_user_name}
@@ -261,4 +267,5 @@ BI_PASSWORD=${var.bi_user_password}
 EOT
 
   filename = "${path.root}/../env/clickhouse.env"
+  depends_on = [null_resource.mk_env_dir]
 }
