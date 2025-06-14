@@ -6,7 +6,7 @@
         <size>1000M</size>
         <count>3</count>
     </logger>
-    <display_name>${cluster_name} node ${node.shard}${node.replica}</display_name>
+    <display_name>${cluster_name} node ${node.shard} replica ${node.replica}</display_name>
     <listen_host>0.0.0.0</listen_host>
     <http_port>${node.http_port}</http_port>
     <tcp_port>${node.tcp_port}</tcp_port>

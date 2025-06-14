@@ -193,7 +193,6 @@ resource "docker_container" "ch_nodes" {
   image    = docker_image.clickhouse_server.name
   # optimization part
   memory   = var.memory_limit
-  # cpus     = var.cpus_limit
 
   user     = "${var.ch_uid}:${var.ch_gid}"
   networks_advanced {

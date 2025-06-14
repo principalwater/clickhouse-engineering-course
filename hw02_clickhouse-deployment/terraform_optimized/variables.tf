@@ -3,14 +3,9 @@ variable "clickhouse_base_path" {
   default = "../volumes"
 }
 
-variable "cpus_limit" {
-  type = string
-  default = "1.5"
-}
-
 variable "memory_limit" {
   type = number
-  default = 8589934592 # 8 * 1024 * 1024 * 1024
+  default = 12884901888 # 12 * 1024 * 1024 * 1024
 }
 
 variable "super_user_name" {
