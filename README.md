@@ -16,6 +16,7 @@
 
 ## 📁 Структура репозитория
 1) [Область применения и первое представление ClickHouse](./hw01_clickhouse-adaptation/hw01.md)
+2) [Развертывание и базовая конфигурация, интерфейсы и инструменты](./hw02_clickhouse-deployment)
 
 ## 🎯 Цели обучения
 
@@ -64,6 +65,7 @@ This repository contains completed homework assignments and projects for the ["C
 
 ## 📁 Repository Structure
 1) [Scope of application and initial overview of ClickHouse](./hw01_clickhouse-adaptation/hw01.md)
+2) [Deployment and Basic Configuration, Interfaces and Tools](./hw02_clickhouse-deployment)
 
 ## 🎯 Learning Objectives
 
