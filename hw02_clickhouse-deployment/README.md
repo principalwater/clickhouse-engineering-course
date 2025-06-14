@@ -349,30 +349,37 @@ sudo powermetrics --samplers cpu_power -n 1
 В рамках выполнения задания были сделаны скриншоты ключевых этапов, которые можно найти в каталоге `screenshots/` или по ссылкам ниже:
 
 - **Работающий кластер ClickHouse**  
-  ![ClickHouse Instance Running](screenshots/clickhouse_instance_running.png)  
-  Демонстрирует успешный запуск и активность всех нод кластера.
+<img src="../screenshots/hw02_clickhouse-deployment/clickhouse_instance_running.png" alt="ClickHouse Instance Running" width="1200"/>
+
+> Демонстрирует успешный запуск и активность всех нод кластера.
 
 - **Настройки ресурсов Docker Desktop**  
-  ![Docker VM Settings](screenshots/docker_vm_settings.png)  
-  Отражает выделение CPU и RAM для контейнеров, соответствующее архитектуре Mac Studio.
+<img src="../screenshots/hw02_clickhouse-deployment/docker_vm_settings.png" alt="Docker VM Settings" width="1200"/>
+  
+> Отражает выделение CPU и RAM для контейнеров, соответствующее архитектуре Mac Studio.
 
 - **Результат контрольного запроса**  
-  ![Dataset Select Query Result](screenshots/dataset_select_query_result.png)  
-  Скриншот выполнения запроса `SELECT count() FROM nyc_taxi.trips_small WHERE payment_type = 1;` с выводом результата.
+<img src="../screenshots/hw02_clickhouse-deployment/dataset_select_query_result.png" alt="Dataset Select Query Result" width="500"/>
+
+> Скриншот выполнения запроса `SELECT count() FROM nyc_taxi.trips_small WHERE payment_type = 1;` с выводом результата.
 
 - **Бенчмарк до оптимизации**  
-  ![Performance Benchmark Before](screenshots/performance_benchmark_before.png)  
-  Замер производительности кластера до внесения изменений в конфиги.
+<img src="../screenshots/hw02_clickhouse-deployment/performance_benchmark_before.png" alt="Performance Benchmark Before" width="700"/>
+
+> Замер производительности кластера до внесения изменений в конфиги.
 
 - **Бенчмарк после оптимизации**  
-  ![Performance Benchmark After](screenshots/performance_benchmark_after.png)  
-  Повторный замер производительности после оптимизации параметров.
+<img src="../screenshots/hw02_clickhouse-deployment/performance_benchmark_after.png" alt="Performance Benchmark After" width="700"/>
+
+> Повторный замер производительности после оптимизации параметров.
 
 - **Обзор финальных конфигов**  
-  ![Config File Overview](screenshots/config_file_overview.png)  
-  Скриншот с отображением оптимизированного файла конфигурации нод ClickHouse на ноде 1 реплика 1.
+<img src="../screenshots/hw02_clickhouse-deployment/config_file_overview.png" alt="Config File Overview" width="700"/>
 
-  ![Users File Overview](screenshots/users_file_overview.png)  
-  Скриншот с отображением оптимизированного файла конфигурации пользователей ClickHouse на ноде 1 реплика 1.
+> Скриншот с отображением оптимизированного файла конфигурации нод ClickHouse на ноде 1 реплика 1.
+
+<img src="../screenshots/hw02_clickhouse-deployment/users_file_overview.png" alt="Users File Overview" width="700"/>
+
+> Скриншот с отображением оптимизированного файла конфигурации пользователей ClickHouse на ноде 1 реплика 1.
 
 Каждый скриншот сопровождается кратким пояснением для наглядности этапов и подтверждения корректности проделанной работы.
