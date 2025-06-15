@@ -160,11 +160,19 @@ resource "null_resource" "superset_post_init" {
         docker exec superset curl -sf http://localhost:8088/health && break || sleep 5
       done
 
-      # Обновляем pip и устанавливаем драйверы ClickHouse внутри контейнера Superset
+      # Обновляем pip и устанавливаем драйверы ClickHouse
       docker exec superset pip install --upgrade pip
       docker exec superset pip install clickhouse-connect clickhouse-driver
 
-      # Далее — стандартная инициализация Superset
+      # Перезапускаем контейнер, чтобы супервизор/uwsgi подхватил новые библиотеки
+      docker restart superset
+
+      # Ждём, когда superset вновь станет healthy
+      for i in {1..30}; do
+        docker exec superset curl -sf http://localhost:8088/health && break || sleep 5
+      done
+
+      # Далее — инициализация Superset
       docker exec superset superset db upgrade
       docker exec superset superset init
       docker exec superset superset fab create-admin \
