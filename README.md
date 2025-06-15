@@ -19,6 +19,9 @@
 2) [Развертывание и базовая конфигурация, интерфейсы и инструменты](./hw02_clickhouse-deployment)
 3) [Работа с SQL в ClickHouse](./hw03_clickhouse-sql-basics)
 
+**Дополнительно:**
+- [Инфраструктура BI: Metabase, Superset, Postgres (Terraform + Docker)](./additional/bi-infra)
+
 ## 🎯 Цели обучения
 
 В результате прохождения курса приобретаются навыки:
@@ -68,6 +71,9 @@ This repository contains completed homework assignments and projects for the ["C
 1) [Scope of application and initial overview of ClickHouse](./hw01_clickhouse-adaptation/hw01.md)
 2) [Deployment and Basic Configuration, Interfaces and Tools](./hw02_clickhouse-deployment)
 3) [Working with SQL in ClickHouse](./hw03_clickhouse-sql-basics)
+
+**Additionally:**
+- [BI Infrastructure: Metabase, Superset, Postgres (Terraform + Docker)](./additional/bi-infra)
 
 ## 🎯 Learning Objectives
 
