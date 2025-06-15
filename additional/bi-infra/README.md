@@ -1,6 +1,15 @@
 # Версия пайплайна: Metabase + Superset с раздельными пользователями/БД (2025-06)
 
+
 # BI-инфраструктура с Metabase и Superset на Terraform + PostgreSQL
+
+## Описание файлов проекта
+
+- `main.tf` — основной Terraform-скрипт, разворачивает инфраструктуру (PostgreSQL, Metabase, Superset и зависимости).
+- `variables.tf` — описание всех переменных, используемых в main.tf, их типы и значения по умолчанию.
+- `outputs.tf` — выводит полезные значения после деплоя: адреса сервисов, креды к БД.
+- `README.md` — инструкция по запуску, настройке, переменным, устранению неполадок.
+- `samples/superset/superset_config.py.tmpl` — шаблон для конфигурационного файла Superset с секретным ключом, используется для генерации файла в контейнер.
 
 В этом каталоге находится Terraform-конфигурация для деплоя BI-инфраструктуры с Metabase, Superset и PostgreSQL.
 
@@ -12,6 +21,9 @@ additional/bi-infra/
 ├── variables.tf
 ├── outputs.tf
 ├── README.md
+└── samples/
+    └── superset/
+        └── superset_config.py.tmpl
 ```
 
 ## Быстрый старт
