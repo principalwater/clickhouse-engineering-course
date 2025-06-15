@@ -1,6 +1,7 @@
 # Data
 volumes/*
 env/*
+*.py
 
 # Terraform
 **/.terraform/*

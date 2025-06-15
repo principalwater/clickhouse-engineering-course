@@ -177,12 +177,3 @@ resource "null_resource" "superset_post_init" {
   }
   depends_on = [docker_container.superset]
 }
-
-# Удаление файла конфигурации Superset после инициализации
-resource "null_resource" "superset_cleanup_config" {
-  provisioner "local-exec" {
-    command = "rm -f ${local_file.superset_config.filename}"
-    interpreter = ["/bin/bash", "-c"]
-  }
-  depends_on = [null_resource.superset_post_init]
-}
