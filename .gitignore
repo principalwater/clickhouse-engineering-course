@@ -1,4 +1,4 @@
-# MacOS system files
+# --- MacOS system files ---
 .DS_Store
 .AppleDouble
 .LSOverride
@@ -11,8 +11,44 @@ Icon
 .DocumentRevisions-V100
 .com.apple.timemachine.donotpresent
 
-# IDE and editor files
+# --- IDE and Editor files ---
 .idea/
 .vscode/
 *.swp
 *.swo
+
+# --- Python Virtualenv & Pycache ---
+env/
+*.env
+venv/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# --- Data, Volumes, and Uploads ---
+volumes/
+volumes/*
+data/
+data/*
+uploads/
+uploads/*
+
+# --- Terraform ---
+**/.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+*.tfvars
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraform*
+
+# --- Logs and Miscellaneous ---
+*.log
+*.bak
+*.tmp
+*.temp
