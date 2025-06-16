@@ -20,7 +20,7 @@
 3) [Работа с SQL в ClickHouse](./hw03_clickhouse-sql-basics)
 
 **Дополнительно:**
-- [Инфраструктурные модули и сценарии автоматизации (Terraform, Docker, ClickHouse)](./base-infra/clickhouse)
+- [Инфраструктурные модули и сценарии автоматизации (Terraform, Docker, ClickHouse)](./base-infra)
 - [Инфраструктура BI: Metabase, Superset, Postgres (Terraform + Docker)](./additional/bi-infra)
 - [Примеры, эксперименты, вспомогательные скрипты и развёртывание ClickHouse с кастомными настройками](./additional/clickhouse)
 
@@ -75,7 +75,7 @@ This repository contains completed homework assignments and projects for the ["C
 3) [Working with SQL in ClickHouse](./hw03_clickhouse-sql-basics)
 
 **Additionally:**
-- [Infrastructure modules and automation scripts (Terraform, Docker, ClickHouse)](./base-infra/clickhouse)
+- [Infrastructure modules and automation scripts (Terraform, Docker, ClickHouse)](./base-infra)
 - [BI Infrastructure: Metabase, Superset, Postgres (Terraform + Docker)](./additional/bi-infra)
 - [Examples, experiments, helper scripts, and advanced ClickHouse deployments](./additional/clickhouse)
 
