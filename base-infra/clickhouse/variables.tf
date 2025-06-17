@@ -1,6 +1,6 @@
 variable "clickhouse_base_path" {
   type    = string
-  default = "../volumes"
+  default = "./volumes"
 }
 
 variable "memory_limit" {
