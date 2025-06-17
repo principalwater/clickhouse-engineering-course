@@ -50,6 +50,18 @@ terraform init
 terraform apply -auto-approve
 ```
 
+---
+
+### (Optional) 5. Перезапустите контейнеры ClickHouse
+
+```bash
+docker restart $(docker ps --format '{{.Names}}' | grep '^clickhouse-' | grep -v keeper)
+```
+
+Это может потребоваться для применения новых UDF и конфигов без пересоздания кластера, но фактически новые функции должны быть сразу доступны и без перезагрузки.
+
+---
+
 **Что делает автоматизация:**
 - Копирует UDF-файлы и XML-файл с описанием функций во все ClickHouse-ноды (кроме keeper)
 - Устанавливает python3 в контейнеры (через apk)
