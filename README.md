@@ -18,6 +18,7 @@
 1) [Область применения и первое представление ClickHouse](./hw01_clickhouse-adaptation/hw01.md)
 2) [Развертывание и базовая конфигурация, интерфейсы и инструменты](./hw02_clickhouse-deployment)
 3) [Работа с SQL в ClickHouse](./hw03_clickhouse-sql-basics)
+4) [Агрегатные функции, работа с типами данных и UDF в ClickHouse](./hw04_clickhouse-functions)
 
 **Дополнительно:**
 - [Инфраструктурные модули и сценарии автоматизации (Terraform, Docker, ClickHouse)](./base-infra)
@@ -73,6 +74,7 @@ This repository contains completed homework assignments and projects for the ["C
 1) [Scope of application and initial overview of ClickHouse](./hw01_clickhouse-adaptation/hw01.md)
 2) [Deployment and Basic Configuration, Interfaces and Tools](./hw02_clickhouse-deployment)
 3) [Working with SQL in ClickHouse](./hw03_clickhouse-sql-basics)
+4) [Aggregate Functions, Working with Data Types, and UDF in ClickHouse](./hw04_clickhouse-functions)
 
 **Additionally:**
 - [Infrastructure modules and automation scripts (Terraform, Docker, ClickHouse)](./base-infra)
