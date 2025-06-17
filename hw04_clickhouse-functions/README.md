@@ -32,7 +32,7 @@ _Такой подход позволяет выполнять запросы и
 
 Детализированное описание задания и критериев оценки
 - [Google Doc (онлайн)](https://docs.google.com/document/d/1hHqRv7lUUDmDkhzXrd0GIx7deF9Ez4mKpoYzHtDjoqQ/edit?tab=t.0)
-- [PDF-версия из репозитория](../hw04_clickhouse-functions/materials/ClickHouse%20Homework.%20UDF,%20Aggregate%20Functions%20and%20working%20with%20data%20types.pdf)
+- [PDF-версия из репозитория](../materials/hw04_clickhouse-functions/ClickHouse%20Homework.%20UDF,%20Aggregate%20Functions%20and%20working%20with%20data%20types.pdf)
 
 ---
 
