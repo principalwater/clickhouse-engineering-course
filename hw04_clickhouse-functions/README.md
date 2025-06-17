@@ -262,7 +262,7 @@ LIMIT 5;
 
 ### Описание
 
-Вариант 2 задания посвящён работе с Executable User-Defined Functions (EUDF) — внешним функциям на Python, автоматически интегрируемым в ClickHouse-кластер пайплайном на базе Terraform (каталог [../additional/clickhouse/](../../additional/clickhouse/)). Вся логика, конфигурация и развёртывание функций максимально автоматизированы.
+Вариант 2 задания посвящён работе с Executable User-Defined Functions (EUDF) — внешним функциям на Python, автоматически интегрируемым в ClickHouse-кластер пайплайном на базе Terraform (каталог [../additional/clickhouse/](../additional/clickhouse/)). Вся логика, конфигурация и развёртывание функций максимально автоматизированы.
 
 ⸻
 
@@ -427,9 +427,9 @@ LIMIT 5;
 
 ### Где смотреть исходники и пайплайн
 
-- Все скрипты EUDF: [user_scripts/](../../additional/clickhouse/user_scripts/)
-- Декларация функций: [user_defined_functions.xml](../../additional/clickhouse/samples/user_defined_functions.xml)
-- Код пайплайна: [main.tf](../../additional/clickhouse/main.tf)
+- Все скрипты EUDF: [user_scripts/](../additional/clickhouse/user_scripts/)
+- Декларация функций: [user_defined_functions.xml](../additional/clickhouse/samples/user_defined_functions.xml)
+- Код пайплайна: [main.tf](../additional/clickhouse/main.tf)
 - Скриншоты: [screenshots каталога](../screenshots/hw04_clickhouse-functions/)
 
 ### Важно
