@@ -35,6 +35,11 @@ data/*
 uploads/
 uploads/*
 
+# Игнорировать любые .py-файлы с конфигами/секретами в additional/bi-infra на любом уровне
+additional/bi-infra/**/superset_config.py
+additional/bi-infra/**/*config.py
+additional/bi-infra/**/*secret.py
+
 # --- Terraform ---
 **/.terraform/
 *.tfstate

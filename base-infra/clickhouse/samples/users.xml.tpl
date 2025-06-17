@@ -2,10 +2,19 @@
 <clickhouse replace="true">
     <profiles>
         <${super_user_name}>
-            <max_memory_usage>10000000000</max_memory_usage>
-            <use_uncompressed_cache>0</use_uncompressed_cache>
-            <load_balancing>in_order</load_balancing>
+            <!-- optimization part start -->
+            <max_memory_usage>10000000000</max_memory_usage> <!-- 10 GB -->
+            <max_threads>8</max_threads> <!-- не стоит завышать, как правило = числу vCPU или performance cores в Apple M-chips -->
+            <max_block_size>65536</max_block_size> <!-- разумный дефолт -->
+            <max_read_buffer_size>16777216</max_read_buffer_size> <!-- 16MB -->
+            <max_bytes_before_external_group_by>2G</max_bytes_before_external_group_by>
+            <max_bytes_before_external_sort>2G</max_bytes_before_external_sort>
+            <load_balancing>random</load_balancing>
             <log_queries>1</log_queries>
+            <!-- НЕ используем background_pool_size, он obsolete! -->
+            <!-- Можно добавить prefer_localhost_replica=true для чтения с локальной ноды -->
+            <prefer_localhost_replica>1</prefer_localhost_replica>
+            <!-- optimization part end -->
         </${super_user_name}>
         <${bi_user_name}>
             <max_memory_usage>500000000</max_memory_usage>

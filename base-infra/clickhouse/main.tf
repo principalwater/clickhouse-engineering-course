@@ -191,10 +191,12 @@ resource "docker_container" "ch_nodes" {
   for_each = { for n in local.clickhouse_nodes : n.name => n }
   name     = each.key
   image    = docker_image.clickhouse_server.name
+  # optimization part
+  memory   = var.memory_limit
 
-  user         = "${var.ch_uid}:${var.ch_gid}"
+  user     = "${var.ch_uid}:${var.ch_gid}"
   networks_advanced {
-    name = docker_network.ch_net.name
+    name   = docker_network.ch_net.name
     aliases = [each.key]
   }
 

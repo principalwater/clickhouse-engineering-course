@@ -1,6 +1,11 @@
 variable "clickhouse_base_path" {
   type    = string
-  default = "./volumes"
+  default = "../volumes"
+}
+
+variable "memory_limit" {
+  type = number
+  default = 12884901888 # 12 * 1024 * 1024 * 1024
 }
 
 variable "super_user_name" {
@@ -30,13 +35,13 @@ variable "bi_user_password" {
 variable "ch_version" {
   description = "ClickHouse server version"
   type        = string
-  default     = "25.5.2.47"
+  default     = "24.5.1.1198"
 }
 
 variable "chk_version" {
   description = "ClickHouse keeper version"
   type        = string
-  default     = "25.5.2.47"
+  default     = "24.5.1.1198-alpine"
 }
 
 variable "ch_uid" {
