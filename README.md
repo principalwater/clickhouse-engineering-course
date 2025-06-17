@@ -19,6 +19,7 @@
 2) [Развертывание и базовая конфигурация, интерфейсы и инструменты](./hw02_clickhouse-deployment)
 3) [Работа с SQL в ClickHouse](./hw03_clickhouse-sql-basics)
 4) [Агрегатные функции, работа с типами данных и UDF в ClickHouse](./hw04_clickhouse-functions)
+5) [Движки MergeTree Family](./hw05_mergetree-engines)
 
 **Дополнительно:**
 - [Инфраструктурные модули и сценарии автоматизации (Terraform, Docker, ClickHouse)](./base-infra)
@@ -75,6 +76,7 @@ This repository contains completed homework assignments and projects for the ["C
 2) [Deployment and Basic Configuration, Interfaces and Tools](./hw02_clickhouse-deployment)
 3) [Working with SQL in ClickHouse](./hw03_clickhouse-sql-basics)
 4) [Aggregate Functions, Working with Data Types, and UDF in ClickHouse](./hw04_clickhouse-functions)
+5) [MergeTree Engines Family](./hw05_mergetree-engines)
 
 **Additionally:**
 - [Infrastructure modules and automation scripts (Terraform, Docker, ClickHouse)](./base-infra)
