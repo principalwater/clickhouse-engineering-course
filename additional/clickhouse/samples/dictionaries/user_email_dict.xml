@@ -3,7 +3,7 @@
     <name>user_email_dict</name>
     <source>
       <file>
-        <path>/var/lib/clickhouse/dictionaries/user_emails.csv</path>
+        <path>/var/lib/clickhouse/user_files/dictionaries/user_emails.csv</path>
         <format>CSVWithNames</format>
       </file>
     </source>

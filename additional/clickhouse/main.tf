@@ -60,9 +60,9 @@ resource "null_resource" "copy_files" {
         if [ "$ENABLE_DICTIONARIES" = "true" ]; then
           mkdir -p "$dir/data/dictionaries"
           cp ${path.module}/samples/dictionaries/*.xml "$dir/data/dictionaries/" 2>/dev/null || true
-          cp ${path.module}/samples/*.py "$dir/data/dictionaries/" 2>/dev/null || true
-          # Кладём user_emails.csv рядом с конфигами
-          cp ${path.module}/samples/user_emails.csv "$dir/data/dictionaries/" 2>/dev/null || true
+          cp ${path.module}/samples/patch_dictionaries.py "$dir/data/dictionaries/" 2>/dev/null || true
+          mkdir -p "$dir/data/user_files/dictionaries"
+          cp ${path.module}/samples/user_emails.csv "$dir/data/user_files/dictionaries/" 2>/dev/null || true
         fi
       done
     EOT
@@ -92,10 +92,10 @@ resource "null_resource" "patch_config_xml" {
             echo "Patched user_defined config for $config_path"
           fi
 
-          # Скрипт патчит include для словарей
+          # Скрипт патчит dictionaries_config для словарей
           if [ "$ENABLE_DICTIONARIES" = "true" ] && [ -f "$dir/data/dictionaries/patch_dictionaries.py" ]; then
             python3 "$dir/data/dictionaries/patch_dictionaries.py" "$config_path"
-            echo "Patched dictionaries include for $config_path"
+            echo "Patched dictionaries_config for $config_path"
           fi
         else
           echo "WARN: $config_path not found, skipping"
