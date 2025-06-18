@@ -1,0 +1,25 @@
+<yandex>
+  <dictionary>
+    <name>user_email_dict</name>
+    <source>
+      <file>
+        <path>/var/lib/clickhouse/dictionaries/user_emails.csv</path>
+        <format>CSVWithNames</format>
+      </file>
+    </source>
+    <layout>
+      <flat/>
+    </layout>
+    <structure>
+      <id>
+        <name>user_id</name>
+      </id>
+      <attribute>
+        <name>email</name>
+        <type>String</type>
+        <null_value></null_value>
+      </attribute>
+    </structure>
+    <lifetime>300</lifetime>
+  </dictionary>
+</yandex>

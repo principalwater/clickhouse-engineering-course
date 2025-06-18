@@ -34,6 +34,7 @@ data/
 data/*
 uploads/
 uploads/*
+additional/clickhouse/**/*.csv
 
 # Игнорировать любые .py-файлы с конфигами/секретами в additional/bi-infra на любом уровне
 additional/bi-infra/**/superset_config.py
