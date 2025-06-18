@@ -21,6 +21,7 @@
 4) [Агрегатные функции, работа с типами данных и UDF в ClickHouse](./hw04_clickhouse-functions)
 5) [Движки MergeTree Family](./hw05_mergetree-engines)
 6) [Джойны и агрегации](./hw06_joins-and-aggregations)
+7) [Работа со словарями и оконными функциями в ClickHouse](./hw07_dictionaries-windows)
 
 **Дополнительно:**
 - [Инфраструктурные модули и сценарии автоматизации (Terraform, Docker, ClickHouse)](./base-infra)
@@ -79,6 +80,7 @@ This repository contains completed homework assignments and projects for the ["C
 4) [Aggregate Functions, Working with Data Types, and UDF in ClickHouse](./hw04_clickhouse-functions)
 5) [MergeTree Engines Family](./hw05_mergetree-engines)
 6) [Joins and Aggregations](./hw06_joins-and-aggregations)
+7) [Dictionaries and Window Functions in ClickHouse](./hw07_dictionaries-windows)
 
 **Additionally:**
 - [Infrastructure modules and automation scripts (Terraform, Docker, ClickHouse)](./base-infra)
