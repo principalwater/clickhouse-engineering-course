@@ -80,6 +80,27 @@ clickhouse-engineering-course/
 
 ---
 
+## Важные переменные окружения
+
+Перед запуском Terraform и sh-скриптов необходимо задать переменные для учётных данных ClickHouse:
+
+```sh
+export TF_VAR_super_user_name="<SUPERUSER_LOGIN>"
+export TF_VAR_super_user_password="<SUPERUSER_PASSWORD>"
+export TF_VAR_bi_user_name="<BI_USER_LOGIN>"
+export TF_VAR_bi_user_password="<BI_USER_PASSWORD>"
+```
+
+> ⚠️ Без этих переменных развертывание не будет выполнено корректно.
+
+После завершения работы обязательно очистите чувствительные переменные:
+
+```sh
+unset TF_VAR_super_user_password TF_VAR_bi_user_password
+```
+
+---
+
 ## Порядок запуска и обновления
 0. Убедитесь, что вы находитесь в корне репозитория:
    ```bash
