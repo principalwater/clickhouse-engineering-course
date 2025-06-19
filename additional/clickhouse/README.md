@@ -161,6 +161,8 @@ dict_samples_dir = "samples"
 ## Примеры тестов в ClickHouse
 
 ```sql
+SELECT test_function_python(1);
+
 SELECT
     price,
     quantity,
