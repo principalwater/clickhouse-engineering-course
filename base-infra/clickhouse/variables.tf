@@ -4,7 +4,7 @@ variable "clickhouse_base_path" {
 }
 
 variable "memory_limit" {
-  type = number
+  type    = number
   default = 12884901888 # 12 * 1024 * 1024 * 1024
 }
 

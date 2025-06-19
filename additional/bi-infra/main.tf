@@ -5,11 +5,11 @@ terraform {
       version = "3.6.1"
     }
     local = {
-      source = "hashicorp/local"
+      source  = "hashicorp/local"
       version = "2.5.3"
     }
     null = {
-      source = "hashicorp/null"
+      source  = "hashicorp/null"
       version = "3.2.4"
     }
   }
@@ -77,7 +77,7 @@ resource "docker_container" "metabase" {
     "MB_DB_PASS=${var.metabase_pg_password}",
     "MB_DB_HOST=postgres"
   ]
-  restart = "unless-stopped"
+  restart    = "unless-stopped"
   depends_on = [docker_container.postgres]
   healthcheck {
     test     = ["CMD-SHELL", "curl --fail -I http://localhost:3000/api/health || exit 1"]
@@ -89,7 +89,7 @@ resource "docker_container" "metabase" {
 
 # Интеграция с Superset
 resource "local_file" "superset_config" {
-  content  = templatefile("${path.module}/samples/superset/superset_config.py.tmpl", {
+  content = templatefile("${path.module}/samples/superset/superset_config.py.tmpl", {
     superset_secret_key = var.superset_secret_key
   })
   filename = abspath("${path.module}/superset_config.py")
@@ -97,7 +97,7 @@ resource "local_file" "superset_config" {
 
 resource "null_resource" "init_superset_db" {
   provisioner "local-exec" {
-    command = <<EOT
+    command     = <<EOT
       # Создаём базу если нет
       docker exec -i postgres psql -U ${var.metabase_pg_user} -tc "SELECT 1 FROM pg_database WHERE datname = '${var.superset_pg_db}'" | grep -q 1 || \
         docker exec -i postgres createdb -U ${var.metabase_pg_user} ${var.superset_pg_db}
@@ -155,7 +155,7 @@ resource "docker_container" "superset" {
 
 resource "null_resource" "superset_post_init" {
   provisioner "local-exec" {
-    command = <<EOT
+    command     = <<EOT
       for i in {1..30}; do
         docker exec superset curl -sf http://localhost:8088/health && break || sleep 5
       done

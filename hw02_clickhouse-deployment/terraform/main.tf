@@ -89,11 +89,11 @@ resource "null_resource" "mk_clickhouse_dirs" {
 # 3. Генерируем users.xml для каждой ClickHouse-ноды
 resource "local_file" "users_xml" {
   for_each = { for n in local.clickhouse_nodes : n.name => n }
-  content  = templatefile("${path.module}/samples/users.xml.tpl", {
-    super_user_name             = local.super_user_name
-    super_user_password_sha256  = local.super_user_password_sha256
-    bi_user_name                = local.bi_user_name
-    bi_user_password_sha256     = local.bi_user_password_sha256
+  content = templatefile("${path.module}/samples/users.xml.tpl", {
+    super_user_name            = local.super_user_name
+    super_user_password_sha256 = local.super_user_password_sha256
+    bi_user_name               = local.bi_user_name
+    bi_user_password_sha256    = local.bi_user_password_sha256
   })
   filename = "${var.clickhouse_base_path}/${each.key}/etc/clickhouse-server/users.d/users.xml"
 
@@ -105,7 +105,7 @@ resource "local_file" "users_xml" {
 # 4. Генерируем config.xml для каждой ClickHouse-ноды (динамика remote_servers, zookeeper, макросы, порты)
 resource "local_file" "config_xml" {
   for_each = { for n in local.clickhouse_nodes : n.name => n }
-  content  = templatefile("${path.module}/samples/config.xml.tpl", {
+  content = templatefile("${path.module}/samples/config.xml.tpl", {
     node                = each.value
     remote_servers      = local.remote_servers
     keepers             = local.keeper_nodes
@@ -135,7 +135,7 @@ resource "null_resource" "mk_keeper_dirs" {
 # 6. Keeper: динамический конфиг для каждой keeper-ноды
 resource "local_file" "keeper_config" {
   for_each = { for k in local.keeper_nodes : k.name => k }
-  content  = templatefile("${path.module}/samples/keeper_config.xml.tpl", {
+  content = templatefile("${path.module}/samples/keeper_config.xml.tpl", {
     keeper      = each.value
     keepers_all = local.keeper_nodes
   })
@@ -153,13 +153,13 @@ resource "docker_container" "keeper" {
   hostname = each.key
   image    = docker_image.clickhouse_keeper.name
 
-  user     = "${var.ch_uid}:${var.ch_gid}"
+  user = "${var.ch_uid}:${var.ch_gid}"
   networks_advanced {
-    name = docker_network.ch_net.name
+    name    = docker_network.ch_net.name
     aliases = [each.key]
   }
 
-  restart  = "unless-stopped"
+  restart = "unless-stopped"
 
   mounts {
     target    = "/etc/clickhouse-keeper/keeper_config.xml"
@@ -192,9 +192,9 @@ resource "docker_container" "ch_nodes" {
   name     = each.key
   image    = docker_image.clickhouse_server.name
 
-  user         = "${var.ch_uid}:${var.ch_gid}"
+  user = "${var.ch_uid}:${var.ch_gid}"
   networks_advanced {
-    name = docker_network.ch_net.name
+    name    = docker_network.ch_net.name
     aliases = [each.key]
   }
 
@@ -213,7 +213,7 @@ resource "docker_container" "ch_nodes" {
     }
   }
 
-  restart      = "unless-stopped"
+  restart = "unless-stopped"
 
   mounts {
     target    = "/etc/clickhouse-server/config.d/config.xml"
@@ -266,6 +266,6 @@ BI_USER=${local.bi_user_name}
 BI_PASSWORD=${var.bi_user_password}
 EOT
 
-  filename = "${path.root}/../env/clickhouse.env"
+  filename   = "${path.root}/../env/clickhouse.env"
   depends_on = [null_resource.mk_env_dir]
 }
