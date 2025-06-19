@@ -7,6 +7,13 @@ on:
 jobs:
   terraform:
     runs-on: ubuntu-latest
+    env:
+      METABASE_PG_PASSWORD: ${{ secrets.METABASE_PG_PASSWORD }}
+      SUPERSET_PG_PASSWORD: ${{ secrets.SUPERSET_PG_PASSWORD }}
+      SUPERSET_SECRET_KEY:  ${{ secrets.SUPERSET_SECRET_KEY }}
+      SUPERSET_SA_PASSWORD: ${{ secrets.SUPERSET_SA_PASSWORD }}
+      CLICKHOUSE_SUPER_USER_PASSWORD: ${{ secrets.CLICKHOUSE_SUPER_USER_PASSWORD }}
+      CLICKHOUSE_BI_USER_PASSWORD: ${{ secrets.CLICKHOUSE_BI_USER_PASSWORD }}
     defaults:
       run:
         shell: bash
@@ -30,17 +37,26 @@ jobs:
           echo "Найдены Terraform директории:"
           cat tf_dirs.txt
 
-          # Для каждой директории: fmt, init, validate, plan
+          set +e
+          failures=0
           while read -r dir; do
             echo "---- Проверка: $dir ----"
             cd "$dir"
-            terraform fmt -check
-            terraform init -backend=false
-            terraform validate
-            terraform plan -out=tfplan || true
+            terraform fmt -check || failures=$((failures+1))
+            terraform init -backend=false || failures=$((failures+1))
+            terraform validate || failures=$((failures+1))
+            terraform plan -out=tfplan \
+              -var="metabase_pg_password=${METABASE_PG_PASSWORD}" \
+              -var="superset_pg_password=${SUPERSET_PG_PASSWORD}" \
+              -var="superset_secret_key=${SUPERSET_SECRET_KEY}" \
+              -var="superset_sa_password=${SUPERSET_SA_PASSWORD}" \
+              -var="super_user_password=${CLICKHOUSE_SUPER_USER_PASSWORD}" \
+              -var="bi_user_password=${CLICKHOUSE_BI_USER_PASSWORD}" || failures=$((failures+1))
             terraform show -no-color tfplan > "../$(basename $dir)_plan.txt" || true
             cd - >/dev/null
           done < tf_dirs.txt
+
+          exit $failures
 
       - name: Upload Terraform plans as artifacts
         uses: actions/upload-artifact@v4
