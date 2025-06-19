@@ -1,0 +1,70 @@
+name: Terraform & Python Lint CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.7.5'
+
+      - name: Find and validate all Terraform projects
+        id: tf-projects
+        run: |
+          # Найти все папки с main.tf, исключая игнорируемые .gitignore
+          find . -type f -name 'main.tf' \
+            | grep -vFf <(git check-ignore $(find . -type f -name 'main.tf')) \
+            | xargs -I {} dirname {} | sort -u > tf_dirs.txt
+
+          echo "Найдены Terraform директории:"
+          cat tf_dirs.txt
+
+          # Для каждой директории: fmt, init, validate, plan
+          while read -r dir; do
+            echo "---- Проверка: $dir ----"
+            cd "$dir"
+            terraform fmt -check
+            terraform init -backend=false
+            terraform validate
+            terraform plan -out=tfplan || true
+            terraform show -no-color tfplan > "../$(basename $dir)_plan.txt" || true
+            cd - >/dev/null
+          done < tf_dirs.txt
+
+      - name: Upload Terraform plans as artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-plans
+          path: ./*_plan.txt
+        if: always()
+
+  python-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Find and check Python scripts syntax
+        run: |
+          # Найти все .py-файлы, не игнорируемые .gitignore и не приватные
+          git ls-files '*.py' ':!:additional/bi-infra/**/superset_config.py' ':!:additional/bi-infra/**/*config.py' ':!:additional/bi-infra/**/*secret.py' \
+            | while read -r file; do
+                echo "Проверка синтаксиса: $file"
+                python -m py_compile "$file"
+              done
