@@ -14,7 +14,7 @@ resource "null_resource" "install_python3" {
     always_run = timestamp()
   }
   provisioner "local-exec" {
-    command = <<EOT
+    command     = <<EOT
       for c in $(docker ps --format '{{.Names}}' | grep -E '^clickhouse-[0-9]+$'); do
         echo "Checking python3 in $c"
         if ! docker exec "$c" python3 --version >/dev/null 2>&1; then
@@ -36,7 +36,7 @@ resource "null_resource" "copy_files" {
     always_run = timestamp()
   }
   provisioner "local-exec" {
-    command = <<EOT
+    command     = <<EOT
       # Генерим user_emails.csv всегда свежий перед копированием
       python3 ${path.module}/samples/gen_user_emails_csv.py
 
@@ -77,7 +77,7 @@ resource "null_resource" "patch_config_xml" {
     always_run = timestamp()
   }
   provisioner "local-exec" {
-    command = <<EOT
+    command     = <<EOT
       ENABLE_COPY_UDF="${var.enable_eudf}"
       ENABLE_DICTIONARIES="${var.enable_dictionaries}"
 
