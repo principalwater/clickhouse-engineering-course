@@ -94,10 +94,17 @@ jobs:
           terraform show -no-color tfplan > plan.txt
         working-directory: ${{ matrix.dir }}
 
+      - name: Sanitize artifact name
+        id: sanitize
+        run: |
+          dir="${{ matrix.dir }}"
+          dir_sanitized=$(echo "$dir" | sed 's#^\./##' | tr '/.' '-' )
+          echo "dir_sanitized=$dir_sanitized" >> $GITHUB_OUTPUT
+
       - name: Upload Terraform plan artifact
         uses: actions/upload-artifact@v4
         with:
-          name: terraform-plan-${{ matrix.dir }}
+          name: terraform-plan-${{ steps.sanitize.outputs.dir_sanitized }}
           path: ${{ matrix.dir }}/plan.txt
 
   python-lint:
