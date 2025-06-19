@@ -1,9 +1,13 @@
 name: Terraform & Python Lint CI
 
 on:
+  workflow_dispatch: {}           # Ручной запуск с любой ветки для теста
   pull_request:
     branches:
-      - main
+      - main                     # Авто-проверка при создании PR на main
+  push:
+    branches:
+      - main                     # Авто-проверка после мерджа в main
 
 jobs:
   find-terraform-dirs:
