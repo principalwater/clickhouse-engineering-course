@@ -21,19 +21,13 @@ variable "dict_samples_dir" {
   default     = "samples"
 }
 
-variable "enable_copy_udf" {
-  description = "Enable copying UDF files"
+variable "enable_eudf" {
+  description = "Флаг для включения/отключения шага с копированием executable UDF конфигов и самих функций"
   type        = bool
   default     = true
 }
 variable "enable_dictionaries" {
-  description = "Enable copying dictionary XML files"
+  description = "Флаг для включения/отключения шага с копированием XML-конфигов словарей и их данных"
   type        = bool
   default     = false
-}
-
-variable "enable_copy_additional_configs" {
-  description = "Флаг для включения/отключения шага с копированием дополнительных XML-конфигов (словари и др.)"
-  type    = bool
-  default = false
 }

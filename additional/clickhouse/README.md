@@ -1,112 +1,164 @@
-# Custom ClickHouse Patch & UDF Pipeline
+# Расширяемый пайплайн кастомизации ClickHouse (UDF, словари и патчи)
 
 ## Назначение
 
-Этот каталог предназначен для кастомизации уже запущенного кластера ClickHouse (развёрнутого через [base-infra/clickhouse](../../base-infra/)), без потери или изменения существующих данных, users и volumes.
+Этот каталог предназначен для  пост-кастомизации уже запущенного кластера ClickHouse, который был развернут через базовый пайплайн из каталога [`base-infra/clickhouse`](../../base-infra/clickhouse). Основная задача — добавить или обновить пользовательские функции (UDF), патчи конфигурации и дополнительные файлы (например, словари) без потери данных, пользователей и без пересоздания кластера.
 
-**Возможности:**
-- Массовое добавление или обновление UDF (Python-функций) для всех контейнеров
-- Патчинг XML-конфигов контейнеров (например, секции `<user_defined>`)
-- Доустановка нужных утилит внутрь контейнеров (например, python3)
-- Лёгкие post-deploy правки без пересоздания кластеров или потери данных
+Данный пайплайн позволяет:
 
-## Управление этапами пайплайна
+- Массово копировать Python-скрипты с UDF во все ноды ClickHouse (кроме keeper)
+- Обновлять XML-файл с описанием пользовательских функций (`user_defined_functions.xml`)
+- Патчить конфигурационные файлы `config.xml` для активации UDF
+- Копировать дополнительные файлы словарей (csv, xml) в volume кластера
+- Устанавливать необходимые утилиты (например, python3) внутри контейнеров
+- Управлять этапами пайплайна через переменные, включая опциональное копирование UDF и словарей
 
-C помощью переменных (`enable_copy_udf`, `enable_copy_dictionaries`) можно независимо включать/отключать этапы:
-- копирование UDF-файлов (Python-скриптов и xml-файла определений)
-- копирование файлов словарей (csv/xml, например для dictionary engine)
-Это позволяет быстро запускать только нужные этапы при тестировании или развертывании.
+Все изменения применяются к уже запущенному кластеру без его пересоздания и не затрагивают данные или пользователей.
 
 ---
 
-## Быстрый старт
+## Структура каталога
 
-### 1. Подготовьте окружение
+- `.terraform/`                  — служебные файлы и плагины Terraform (создаётся автоматически)
+- `.terraform.lock.hcl`.         — lock-файл зависимостей Terraform
+- `main.tf`                      — основной Terraform-манифест (логика копирования файлов, патчинга конфигов и установки пакетов внутри контейнеров ClickHouse)
+- `variables.tf`.                — описание переменных Terraform, включая пути к volume кластера, флаги включения этапов (UDF, словари) и другие параметры
+- `outputs.tf`                   — выводы Terraform для мониторинга и интеграции
+- `samples/`                     — вспомогательные файлы и скрипты:
+    - gen_user_emails_csv.py     — генерация тестового .csv для словаря email
+    - patch_dictionaries.py      — скрипт патчинга config.xml для подключения словарей
+    - patch_user_defined.py      — скрипт патчинга config.xml для UDF
+    - user_defined_functions.xml — XML с описанием UDF для ClickHouse
+    - user_emails.csv            — автогенерируемый .csv для примера словаря
+    - `dictionaries/`            — каталог с xml-конфигами словарей (например, user_email_dict.xml)
+- `user_scripts/`                — директория с Python-скриптами, реализующими UDF (копируются на все ClickHouse-ноды)
+    - classify_transaction.py, detect_fraud.py, test_function.py, total_cost.py (и др.)
+- `terraform.tfstate`            — состояние Terraform (создаётся автоматически)
+- `terraform.tfstate.backup`     — бэкап состояния Terraform (создаётся автоматически)
+- `venv/`                        — виртуальное окружение Python (создаётся вручную для запуска скриптов патчинга XML)
+- `README.md`                    — данный файл с документацией по работе каталога
 
-Перейдите в каталог [additional/clickhouse](.) и создайте виртуальное окружение для Python:
+---
+
+## Инструкция по развертыванию и использованию
+
+### 1. Предварительное условие: базовый кластер
+
+Перед использованием данного пайплайна необходимо развернуть базовый кластер ClickHouse с помощью пайплайна из каталога [`base-infra/clickhouse`](../../base-infra/clickhouse). Этот базовый пайплайн создаёт все контейнеры, тома и базовые конфигурации.
+
+---
+
+### 2. Настройка Python окружения
+
+Для корректной работы патчера XML-конфигов требуется Python с установленным пакетом `lxml`.
 
 ```bash
+cd additional/clickhouse
 python3 -m venv venv
 source venv/bin/activate
 pip install lxml
 ```
-*(lxml требуется для корректной работы патчера XML-конфигов)*
 
 ---
 
-### 2. Проверьте структуру
+### 3. Настройка переменных Terraform
 
-- Все .py-функции для UDF должны лежать в [`user_scripts/`](./user_scripts)
-- Файл с определениями UDF — [`samples/user_defined_functions.xml`](./samples/user_defined_functions.xml)
-- Патчер для config.xml — [`samples/patch_user_defined.py`](./samples/patch_user_defined.py)
+Для управления этапами пайплайна и путями к volume кластера используйте файл `terraform.tfvars` или задавайте переменные через командную строку.
 
----
-
-### 3. Настройте конфигурацию
-
-При необходимости скорректируйте файлы:
-- [`main.tf`](./main.tf) — все шаги автоматизации через Terraform.
-- [`variables.tf`](./variables.tf) — корректные пути к volume кластера ClickHouse (по умолчанию — `../../base-infra/clickhouse/volumes`).
-
----
-
-### 4. Настройка переменных
-
-Для управления этапами пайплайна используйте переменные `enable_copy_udf` и `enable_copy_dictionaries`. Их можно задать в файле `terraform.tfvars` или через переменные окружения. Пример для `terraform.tfvars`:
+Пример `terraform.tfvars`:
 
 ```hcl
-enable_copy_udf = true
-enable_copy_dictionaries = false
+enable_eudf = true
+enable_dictionaries = false
+clickhouse_volumes_path = "../../base-infra/clickhouse/volumes"
+udf_dir = "user_scripts"
+dict_samples_dir = "samples"
 ```
 
-Альтернативно, можно передать значения переменных напрямую при запуске terraform:
+- `enable_eudf` — Флаг для включения/отключения шага с копированием executable UDF конфигов и самих функций.
+- `enable_dictionaries` — Флаг для включения/отключения шага с копированием XML-конфигов словарей и их данных.
+- `enable_copy_additional_configs` — включает копирование дополнительных конфигов и патчей.
+- `clickhouse_volumes_path` — Путь к volume с данными и конфигами кластера.
+- `udf_dir` — Каталог с Python-скриптами UDF.
+- `dict_samples_dir` — Каталог с примерами файлов словарей.
 
-```bash
-terraform apply -auto-approve -var="enable_copy_udf=true" -var="enable_copy_dictionaries=false"
-```
-
-Это позволит включать или отключать копирование UDF и файлов словарей независимо друг от друга.
+> **Примечание:** Если вызвать `terraform apply -auto-approve` без явного задания переменных (в `terraform.tfvars` или через CLI), будут выполнены только шаги по патчингу UDF (копирование UDF-скриптов и патч `config.xml`). Этапы, связанные со словарями, не затрагиваются.
 
 ---
 
-### 5. Примените изменения
+### 4. Применение пайплайна
+
+Запустите Terraform:
 
 ```bash
 terraform init
 terraform apply -auto-approve
 ```
 
+Пайплайн выполнит следующие действия:
+
+- Копирует Python-скрипты из `user_scripts/` и `user_defined_functions.xml` из `samples/` во все ClickHouse-ноды (кроме keeper) при включённом `enable_eudf`.
+- Копирует файлы словарей из соответствующих директорий в volume при включённом `enable_dictionaries`.
+- Патчит `config.xml` каждой ноды с помощью скрипта `patch_user_defined.py` для активации пользовательских функций.
+- Устанавливает python3 и другие утилиты внутри контейнеров (через apk).
+- Устанавливает права на исполнение для всех Python-скриптов.
+
 ---
 
-### 6. Копирование файлов словарей
+### 5. Проверка успешного применения
 
-Файлы словарей (csv, xml и другие), используемые в dictionary engine ClickHouse, теперь можно копировать опционально в volume всех ClickHouse-нод. Это удобно для обновления или добавления новых словарей без пересоздания кластеров. Для этого включите флаг `enable_copy_dictionaries`. Если он выключен, файлы словарей не копируются.
+- Проверьте логи Terraform на предмет ошибок.
+- Рестарт контейнеров для применения изменений делать не нужно — все изменения применяются "на лету".
 
----
-
-### (Optional) 7. Перезапустите контейнеры ClickHouse
+Если потребуется принудительный рестарт, можно использовать команду:
 
 ```bash
 docker restart $(docker ps --format '{{.Names}}' | grep '^clickhouse-' | grep -v keeper)
 ```
 
-Это может потребоваться для применения новых UDF и конфигов без пересоздания кластера, но фактически новые функции должны быть сразу доступны и без перезагрузки.
+- Выполните тестовые запросы к UDF и словарям в ClickHouse (см. примеры ниже).
 
 ---
 
-**Что делает автоматизация:**
-- Копирует UDF-файлы и XML-файл с описанием функций во все ClickHouse-ноды (кроме keeper)
-- Устанавливает python3 в контейнеры (через apk)
-- Патчит конфиг-файл `config.xml` каждой ноды для активации пользовательских функций
-- Устанавливает права на исполнение для всех Python-скриптов
+## Работа с UDF и словарями
+
+- Чтобы активировать пользовательские функции через executable UDF, включите `enable_eudf = true`.
+  - Python-файлы из `user_scripts/` копируются в контейнеры.
+  - Файл `samples/user_defined_functions.xml` копируется и используется для регистрации функций.
+  - Конфигурация `config.xml` каждой ноды патчится для активации UDF.
+- Чтобы активировать копирование словарей, включите `enable_dictionaries = true`.
+  - Файлы словарей (csv, xml и др.) копируются в соответствующие тома кластера.
+- Все операции безопасны и не требуют пересоздания кластера или потери данных.
 
 ---
 
-## Проверка UDF-функций на синтетических данных
+## Восстановление исходного состояния
 
-Протестировать UDF можно прямо в ClickHouse, не используя реальные таблицы. Примеры:
+Для отката кастомизации просто выполните повторный запуск базового пайплайна из [`base-infra/clickhouse`](../../base-infra/clickhouse). Он восстановит оригинальные конфигурации без патчей и пользовательских функций.
 
-### Пример: total_cost (2 аргумента)
+---
+
+## Примеры переменных для Terraform
+
+```hcl
+enable_eudf = true
+enable_dictionaries = false
+clickhouse_volumes_path = "../../base-infra/clickhouse/volumes"
+udf_dir = "user_scripts"
+dict_samples_dir = "samples"
+```
+
+---
+
+## Важные ссылки
+
+- [Базовый пайплайн ClickHouse](../../base-infra/clickhouse)
+- [Документация Terraform](https://www.terraform.io/)
+- [lxml для Python](https://lxml.de/)
+
+---
+
+## Примеры тестов в ClickHouse
 
 ```sql
 SELECT
@@ -122,96 +174,32 @@ FROM
 );
 ```
 
-### Пример: classify_transaction (4 аргумента)
-
 ```sql
-SELECT
-    price,
-    quantity,
-    product_id,
-    user_id,
-    classify_transaction(price, quantity, product_id, user_id) AS transaction_type
-FROM
-(
-    -- large_purchase
-    SELECT 1500 as price, 2 as quantity, 501 as product_id, 110 as user_id UNION ALL
-    -- rare_product
-    SELECT 100, 1, 521, 200 UNION ALL
-    -- regular
-    SELECT 20, 1, 503, 130 UNION ALL
-    -- frequent_buyer
-    SELECT 10, 1, 502, 119
-)
-ORDER BY price DESC;
-```
+SELECT dictGet('user_email_dict', 'email', toUInt64(1002)) AS email;
 
-### Пример: detect_fraud (3 аргумента)
-
-```sql
-SELECT
-    price,
-    product_id,
-    transaction_date,
-    detect_fraud(price, product_id, transaction_date) AS fraud_flag
-FROM
-(
-    SELECT 2200 as price, 600 as product_id, '2024-06-16' as transaction_date UNION ALL
-    SELECT 500, 591, '2024-06-17' UNION ALL
-    SELECT 5000, 599, '2024-06-16'
-);
-```
-
-### Пример: test_function_python (1 аргумент)
-
-```sql
-SELECT
-    number AS value,
-    test_function_python(number) AS output
-FROM numbers(5);
+SELECT *
+FROM dictionary('user_email_dict')
+LIMIT 10;
 ```
 
 ---
 
-## FAQ
+## Примечания
 
-- **Удалятся ли данные?**  
-  Нет, все действия происходят только в live-контейнерах. Данные и users не затрагиваются.
-
-- **Как добавить новые пакеты внутрь всех контейнеров?**  
-  Используйте паттерн из ресурса `install_python3` в [`main.tf`](./main.tf) — меняйте apk add на нужный пакет.
-
-- **Как добавить новый UDF?**  
-  - Добавьте Python-файл в [`user_scripts/`](./user_scripts)
-  - Пропишите функцию в [`samples/user_defined_functions.xml`](./samples/user_defined_functions.xml)
-  - Запустите `terraform apply`
-
-- **Как откатить изменения?**  
-  Просто перезапустите terraform apply из [base-infra/clickhouse](../../base-infra/clickhouse) — он пересоберёт оригинальные конфиги без патчей.
-
-- **Где брать шаблоны конфигов?**  
-  В каталоге [`base-infra/clickhouse/samples`](../../base-infra/clickhouse/samples).
-
-- **Как включить/отключить отдельные этапы пайплайна?**  
-  Используйте переменные `enable_copy_udf` и `enable_copy_dictionaries` в `terraform.tfvars` или через переменные окружения. Например:
-
-  ```hcl
-  enable_copy_udf = true
-  enable_copy_dictionaries = false
-  ```
+- Все операции выполняются на запущенных контейнерах, данные и пользователи не затрагиваются.
+- Для корректной работы патчинга XML обязательно активируйте Python virtualenv с установленным `lxml`.
+- Управление этапами пайплайна через переменные позволяет гибко тестировать и разворачивать изменения без полного пересоздания кластера.
+- При добавлении новых UDF добавляйте Python-скрипты в `user_scripts/` и обновляйте `samples/user_defined_functions.xml`.
 
 ---
 
-## Примечания и узкие места
-
-- Если добавляете патчер или дополнительный скрипт — не забывайте обновлять права на выполнение (`chmod +x ...`).
-- Проверяйте, что на всех нодах установлен python3 (Terraform сам его поставит, если вы не убирали install_python3).
-- Любые проблемы с XML — сначала проверьте, что патчер запускается в активированном venv и lxml установлен.
-- Раздельное управление этапами пайплайна (UDF/словари) позволяет гибко тестировать отдельные сценарии, не перепровиженивая всё.
+**Каталог предназначен для безопасных post-deploy изменений без пересоздания кластера!**
 
 ---
 
-**Каталог предназначен для безопасных post-deploy изменений — не требует пересоздания кластера!**
+## FAQ. Типовые проблемы и их решение
 
----
-
-Если нужна индивидуальная логика под новые UDF или хотите добавить дополнительную автоматизацию — расширяйте [`main.tf`](./main.tf) по аналогии с текущими ресурсами.
+- **Ошибка FILE_DOESNT_EXIST**: Проверьте, что .csv-файл словаря действительно находится в нужном каталоге (обычно `/var/lib/clickhouse/user_files/` или `/var/lib/clickhouse/user_files/dictionaries/` внутри volume).
+- **Ошибка PATH_ACCESS_DENIED**: Проверьте, что путь к .csv-файлу находится строго внутри `/var/lib/clickhouse/user_files/` (или вложенной папки) — ClickHouse не разрешает читать словари из других путей.
+- **dictGet возвращает NULL или ошибку**: Убедитесь, что словарь корректно создан, файл .csv существует на всех нодах и права на чтение установлены.
+- **Изменения не применяются**: Проверьте логи Terraform, убедитесь, что команда патчинга `config.xml` и копирования файлов прошла успешно; при необходимости пересоздайте volume или повторите копирование.

@@ -1,13 +1,13 @@
 output "copy_udf_status" {
-  value = var.enable_copy_udf ? "UDF скрипты скопированы и настроены." : "UDF скрипты не копировались."
+  value = var.enable_eudf ? "UDF скрипты скопированы и настроены." : "UDF скрипты не копировались."
 }
 
 output "patch_user_defined_status" {
-  value = var.enable_copy_udf ? "patch_user_defined.py был применён к каждой ноде." : "patch_user_defined.py не применялся."
+  value = var.enable_eudf ? "patch_user_defined.py был применён к каждой ноде." : "patch_user_defined.py не применялся."
 }
 
 output "udf_files" {
-  value = var.enable_copy_udf ? fileset("${path.module}/${var.udf_dir}", "*.py") : []
+  value = var.enable_eudf ? fileset("${path.module}/${var.udf_dir}", "*.py") : []
 }
 
 output "dictionaries_status" {

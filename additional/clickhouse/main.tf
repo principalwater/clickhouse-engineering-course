@@ -40,7 +40,7 @@ resource "null_resource" "copy_files" {
       # Генерим user_emails.csv всегда свежий перед копированием
       python3 ${path.module}/samples/gen_user_emails_csv.py
 
-      ENABLE_COPY_UDF="${var.enable_copy_udf}"
+      ENABLE_COPY_UDF="${var.enable_eudf}"
       ENABLE_DICTIONARIES="${var.enable_dictionaries}"
 
       VOLUMES_PATH="${path.module}/${var.clickhouse_volumes_path}"
@@ -78,7 +78,7 @@ resource "null_resource" "patch_config_xml" {
   }
   provisioner "local-exec" {
     command = <<EOT
-      ENABLE_COPY_UDF="${var.enable_copy_udf}"
+      ENABLE_COPY_UDF="${var.enable_eudf}"
       ENABLE_DICTIONARIES="${var.enable_dictionaries}"
 
       VOLUMES_PATH="${path.module}/${var.clickhouse_volumes_path}"
