@@ -22,7 +22,11 @@ jobs:
             | xargs -I {} dirname {} | sort -u)
           echo "Найдены Terraform директории:"
           printf '%s\n' "${dirs[@]}"
-          echo "tf_dirs=$(printf '%s\n' "${dirs[@]}" | jq -R . | jq -s .)" >> $GITHUB_OUTPUT
+          clean_dirs=()
+          for d in "${dirs[@]}"; do
+            clean_dirs+=( "$(echo "$d" | xargs)" )
+          done
+          echo "tf_dirs=$(printf '%s\n' "${clean_dirs[@]}" | jq -R . | jq -s .)" >> $GITHUB_OUTPUT
 
   terraform:
     needs: find-terraform-dirs
