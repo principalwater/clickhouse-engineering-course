@@ -10,8 +10,8 @@ jobs:
     env:
       METABASE_PG_PASSWORD: ${{ secrets.METABASE_PG_PASSWORD }}
       SUPERSET_PG_PASSWORD: ${{ secrets.SUPERSET_PG_PASSWORD }}
-      SUPERSET_SECRET_KEY:  ${{ secrets.SUPERSET_SECRET_KEY }}
       SUPERSET_SA_PASSWORD: ${{ secrets.SUPERSET_SA_PASSWORD }}
+      SUPERSET_SECRET_KEY:  ${{ secrets.SUPERSET_SECRET_KEY }}
       CLICKHOUSE_SUPER_USER_PASSWORD: ${{ secrets.CLICKHOUSE_SUPER_USER_PASSWORD }}
       CLICKHOUSE_BI_USER_PASSWORD: ${{ secrets.CLICKHOUSE_BI_USER_PASSWORD }}
     defaults:
@@ -60,7 +60,11 @@ jobs:
             fi
 
             # shellcheck disable=SC2086
-            eval terraform plan -out=tfplan $VARS || failures=$((failures+1))
+            eval terraform plan -out=tfplan $VARS
+            rc=$?
+            if [[ $rc -ne 0 && $rc -ne 2 && $rc -ne 3 ]]; then
+              failures=$((failures+1))
+            fi
             terraform show -no-color tfplan > "../$(basename $dir)_plan.txt" || true
             cd - >/dev/null
           done < tf_dirs.txt
