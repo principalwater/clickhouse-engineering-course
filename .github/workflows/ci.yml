@@ -26,7 +26,8 @@ jobs:
           for d in "${dirs[@]}"; do
             clean_dirs+=( "$(echo "$d" | xargs)" )
           done
-          printf '%s\n' "${clean_dirs[@]}" | sed '/^\s*$/d' | jq -R . | jq -s . | xargs -I{} echo "tf_dirs={}" >> $GITHUB_OUTPUT
+          printf '%s\n' "${clean_dirs[@]}" | sed '/^\s*$/d' | jq -R . | jq -s . > tf_dirs.json
+          echo "tf_dirs=$(cat tf_dirs.json)" >> $GITHUB_OUTPUT
 
   terraform:
     needs: find-terraform-dirs
