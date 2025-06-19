@@ -27,7 +27,7 @@ jobs:
             d_clean=$(echo "$d" | xargs)
             [ -n "$d_clean" ] && clean_dirs+=("$d_clean")
           done
-          printf '%s\n' "${clean_dirs[@]}" | jq -R . | jq -s . > tf_dirs.json
+          printf '%s\n' "${clean_dirs[@]}" | jq -R . | jq -s . | tr -d ' \n' > tf_dirs.json
           echo "tf_dirs=$(cat tf_dirs.json)" >> $GITHUB_OUTPUT
 
   terraform:
