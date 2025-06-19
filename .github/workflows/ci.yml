@@ -45,13 +45,22 @@ jobs:
             terraform fmt -check || failures=$((failures+1))
             terraform init -backend=false || failures=$((failures+1))
             terraform validate || failures=$((failures+1))
-            terraform plan -out=tfplan \
-              -var="metabase_pg_password=${METABASE_PG_PASSWORD}" \
-              -var="superset_pg_password=${SUPERSET_PG_PASSWORD}" \
-              -var="superset_secret_key=${SUPERSET_SECRET_KEY}" \
-              -var="superset_sa_password=${SUPERSET_SA_PASSWORD}" \
-              -var="super_user_password=${CLICKHOUSE_SUPER_USER_PASSWORD}" \
-              -var="bi_user_password=${CLICKHOUSE_BI_USER_PASSWORD}" || failures=$((failures+1))
+
+            VARS=""
+            if [ -f variables.tf ]; then
+              # Ищем все sensitive переменные (и только их)
+              for var in $(awk '/variable /{gsub(/["{}]/,"",$2); name=$2} /sensitive *=[^=]*true/ {print name}' variables.tf); do
+                secret_name=$(echo "$var" | tr '[:lower:]' '[:upper:]')
+                # Добавляем только если секрет определён в окружении
+                eval val=\$$secret_name
+                if [ -n "$val" ]; then
+                  VARS="$VARS -var=\"$var=$val\""
+                fi
+              done
+            fi
+
+            # shellcheck disable=SC2086
+            eval terraform plan -out=tfplan $VARS || failures=$((failures+1))
             terraform show -no-color tfplan > "../$(basename $dir)_plan.txt" || true
             cd - >/dev/null
           done < tf_dirs.txt
