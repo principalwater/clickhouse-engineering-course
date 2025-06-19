@@ -6,7 +6,7 @@
 
 ## ⚙️ Автоматизация CI/CD
 
-В репозитории настроен пайплайн CI/CD на базе Github Actions. Автоматическая проверка и тестирование инфраструктурного кода (Terraform), включая валидацию, форматирование, генерацию плана изменений и загрузку артефактов, выполняются при каждом коммите. Также выполняется автоматический lint и форматирование Python-скриптов в репозитории. Все секретные переменные прокидываются через Github Actions Secrets. Пайплайн масштабируем и может быть легко расширен для новых инфраструктурных модулей и интеграций.
+В репозитории настроен production-ready пайплайн CI/CD на базе Github Actions. Проверка и тестирование инфраструктурного кода (Terraform) включает автоматическую валидацию, форматирование, генерацию плана изменений и загрузку артефактов при каждом pull request в основную ветку. Все секретные переменные прокидываются через Github Actions Secrets. Также выполняется автоматический lint и форматирование всех Python-скриптов. Пайплайн масштабируем и легко расширяется под новые инфраструктурные модули и интеграции. Мерж в master (main) разрешён только при успешном прохождении всех проверок.
 
 ## 📚 О курсе
 
@@ -71,7 +71,7 @@ This repository contains completed homework assignments and projects for the ["C
 
 ## ⚙️ CI/CD Automation
 
-This repository includes a CI/CD pipeline powered by GitHub Actions. Infrastructure code (Terraform) is automatically validated, formatted, and planned, with artifacts generated and uploaded on every commit. Python scripts in the repository are also automatically linted and formatted. All sensitive variables are managed securely using GitHub Actions Secrets. The pipeline is scalable and can be easily extended for new infrastructure modules and integrations.
+This repository is equipped with a production-ready CI/CD pipeline powered by GitHub Actions. Infrastructure code (Terraform) is automatically validated, formatted, and planned with artifacts generated and uploaded on every pull request to the main branch. All sensitive variables are managed securely using GitHub Actions Secrets. All Python scripts are automatically linted and formatted as part of the pipeline. The workflow is scalable and can be easily extended for new infrastructure modules and integrations. Merging to master (main) is allowed only after all checks have passed successfully.
 
 ## 📚 About the Course
 
