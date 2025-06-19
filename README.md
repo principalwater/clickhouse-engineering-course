@@ -2,6 +2,12 @@
 
 Этот репозиторий содержит выполненные домашние задания и проекты по курсу ["ClickHouse для инженеров и архитекторов БД"](https://otus.ru/lessons/clickhouse/) от образовательной платформы OTUS.
 
+[//]: # (----)
+
+## ⚙️ Автоматизация CI/CD
+
+В репозитории настроен пайплайн CI/CD на базе Github Actions. Автоматическая проверка и тестирование инфраструктурного кода (Terraform), включая валидацию, форматирование, генерацию плана изменений и загрузку артефактов, выполняются при каждом коммите. Также выполняется автоматический lint и форматирование Python-скриптов в репозитории. Все секретные переменные прокидываются через Github Actions Secrets. Пайплайн масштабируем и может быть легко расширен для новых инфраструктурных модулей и интеграций.
+
 ## 📚 О курсе
 
 **ClickHouse для инженеров и архитекторов БД** — это профессиональный курс продолжительностью 4 месяца, который охватывает все аспекты работы с ClickHouse: от установки и настройки до решений для продакшена.
@@ -60,6 +66,12 @@
 # Homework Assignments for "ClickHouse for DB Engineers and Architects" Course
 
 This repository contains completed homework assignments and projects for the ["ClickHouse for DB Engineers and Architects"](https://otus.ru/lessons/clickhouse/) course from OTUS educational platform.
+
+[//]: # (----)
+
+## ⚙️ CI/CD Automation
+
+This repository includes a CI/CD pipeline powered by GitHub Actions. Infrastructure code (Terraform) is automatically validated, formatted, and planned, with artifacts generated and uploaded on every commit. Python scripts in the repository are also automatically linted and formatted. All sensitive variables are managed securely using GitHub Actions Secrets. The pipeline is scalable and can be easily extended for new infrastructure modules and integrations.
 
 ## 📚 About the Course
 
