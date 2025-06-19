@@ -90,22 +90,15 @@ jobs:
 
       - name: Terraform Plan
         run: |
-          set -e
           terraform plan -out=tfplan ${{ steps.load-vars.outputs.vars }}
-          rc=$?
-          if [[ $rc -eq 1 ]]; then
-            echo "Terraform plan failed"
-            exit 1
-          fi
-          plan_file="$(basename '${{ matrix.dir }}')_plan.txt"
-          terraform show -no-color tfplan > "$plan_file"
+          terraform show -no-color tfplan > plan.txt
         working-directory: ${{ matrix.dir }}
 
       - name: Upload Terraform plan artifact
         uses: actions/upload-artifact@v4
         with:
-          name: terraform-plan-$(basename '${{ matrix.dir }}')
-          path: ${{ matrix.dir }}/$(basename '${{ matrix.dir }}')_plan.txt
+          name: terraform-plan-${{ matrix.dir }}
+          path: ${{ matrix.dir }}/plan.txt
 
   python-lint:
     runs-on: ubuntu-latest
