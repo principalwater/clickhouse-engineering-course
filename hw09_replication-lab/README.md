@@ -4,197 +4,250 @@
 
 ## Оглавление
 
-- [Описание задания](#описание-задания)  
-- [Внесённые изменения в инфраструктурные файлы](#внесённые-изменения-в-инфраструктурные-файлы)  
-- [Шаг 1. Демонстрационный датасет и описание таблицы `menu`](#шаг-1-демонстрационный-датасет-и-описание-таблицы-menu)  
-  - [Подготовка данных к импорту](#подготовка-данных-к-импорту)
-  - [Создание таблицы menu](#создание-таблицы-menu)
-  - [Загрузка данных в ClickHouse](#загрузка-данных-в-clickhouse)
-- [Шаг 2. Конвертация таблицы в реплицируемую](#шаг-2-конвертация-таблицы-в-реплицируемую)  
-- [Шаг 3. Добавление реплик в кластер](#шаг-3-добавление-реплик-в-кластер)  
-- [Шаг 4. Проверка состояния репликации и частей таблиц](#шаг-4-проверка-состояния-репликации-и-частей-таблиц)  
-- [Шаг 5. Настройка TTL для автоматического удаления данных](#шаг-5-настройка-ttl-для-автоматического-удаления-данных)  
+- [Описание задания и цели](#описание-задания-и-цели)  
+- [Архитектура кластера и внесённые изменения](#архитектура-кластера-и-внесённые-изменения)  
+- [Подготовка: создание базы данных и подготовка датасета](#подготовка-создание-базы-данных-и-подготовка-датасета)  
+- [Шаг 1. Создание таблицы menu](#шаг-1-создание-таблицы-menu)  
+- [Шаг 2. Импорт данных в таблицу menu](#шаг-2-импорт-данных-в-таблицу-menu)  
+- [Шаг 3. Конвертация таблицы в реплицируемую и добавление реплик](#шаг-3-конвертация-таблицы-в-реплицируемую-и-добавление-реплик)  
+- [Шаг 4. Кластерные запросы и проверка репликации](#шаг-4-кластерные-запросы-и-проверка-репликации)  
+- [Шаг 5. Добавление колонки date и настройка TTL](#шаг-5-добавление-колонки-date-и-настройка-ttl)  
 - [Проверка отказоустойчивости и анализ репликации](#проверка-отказоустойчивости-и-анализ-репликации)  
-- [Итоговый вывод](#итоговый-вывод)  
-- [Источники](#источники)  
+- [Общие выводы по заданию](#общие-выводы-по-заданию)  
+- [Список источников](#список-источников)  
 
 ---
 
-## Описание задания
+## Описание задания и цели
 
-В данном домашнем задании изучаются возможности репликации в ClickHouse, работа с реплицируемыми таблицами и настройка фоновых процессов, таких как TTL для автоматического удаления устаревших данных.
+В данном домашнем задании изучается настройка репликации и фоновых процессов в ClickHouse на примере реального демонстрационного датасета. Репликация обеспечивает высокую доступность и отказоустойчивость данных, а TTL позволяет автоматически удалять устаревшие данные, что важно для масштабируемых аналитических систем с большими объёмами информации.
 
-### Цели задания
+Цели задания:  
+- Создать отказоустойчивую реплицируемую таблицу с использованием движка `ReplicatedMergeTree`.  
+- Настроить кластер с несколькими шардами и репликами через инфраструктурный код (Terraform).  
+- Импортировать и обработать реальные данные.  
+- Настроить TTL для автоматического удаления старых данных.  
+- Выполнить кластерные запросы для проверки состояния репликации и синхронизации.  
 
-- Научиться создавать реплицируемые таблицы с использованием макросов `{shard}` и `{replica}`.  
-- Мигрировать данные из существующих таблиц в реплицируемые.  
-- Добавлять реплики в кластер через инфраструктурный код (Terraform).  
-- Выполнять кластерные запросы для проверки состояния репликации.  
-- Настраивать TTL для хранения данных только за последние 7 дней.  
-
-### Бизнес-контекст
-
-В современных аналитических системах важна высокая доступность и отказоустойчивость данных. Репликация в ClickHouse обеспечивает синхронизацию данных между узлами кластера, а TTL позволяет автоматически очищать устаревшие данные, освобождая место и поддерживая актуальность информации.
-
-### Компетенции, развиваемые в задании
-
-- Управление кластерами ClickHouse с использованием репликации.  
-- Работа с движком `ReplicatedMergeTree` и макросами конфигурации.  
-- Инфраструктурное управление кластерами через Terraform.  
-- Настройка фоновых процессов и автоматизация очистки данных.  
-- Мониторинг и диагностика состояния реплик и кластера.  
-
-### Легенда для скриншотов
-
-В отчёте после каждого ключевого шага приводится скриншот, отражающий результат выполнения действия: создание таблиц, миграция данных, статус реплик и т.д. Скриншоты помогают визуально подтвердить правильность выполнения операций.
+Компетенции, которые будут отработаны:  
+- Работа с кластерами ClickHouse и движком `ReplicatedMergeTree`.  
+- Управление инфраструктурой через Terraform.  
+- Настройка и мониторинг репликации.  
+- Использование TTL для управления жизненным циклом данных.  
 
 ---
 
-## Внесённые изменения в инфраструктурные файлы
+## Архитектура кластера и внесённые изменения
 
-Все необходимые для запуска кластера файлы (main.tf, variables.tf, outputs.tf, шаблоны конфигов в samples) уже находятся в каталоге `hw09_replication-lab/terraform` — дополнительных копирований не требуется.
+Базовый кластер развёрнут и управляется через Terraform из каталога [`base-infra/`](../base-infra/).  
+Вся инфраструктурная автоматизация — в каталоге [`base-infra/clickhouse`](../base-infra/clickhouse), где находится шаблон базовой конфигурации и volume для ClickHouse.  
+Подробнее о структуре инфраструктуры см. в [base-infra/README.md](../base-infra/README.md).
 
-Для выполнения задания и масштабирования кластера были внесены следующие изменения:
+**Схема кластера:**
+- **2 шарда × 2 реплики** (4 ноды ClickHouse)  
+- **3 Keeper-ноды** (для метаданных и координации репликации)
+- Изолированная сетевая среда, централизованный volume
 
-- В файле `main.tf` расширен блок `clickhouse_nodes`: теперь описано 2 шарда по 3 реплики (всего 6 нод), что позволяет продемонстрировать полноценную репликацию и отказоустойчивость.
-- В блоке `remote_servers` в `main.tf` добавлены новые реплики для каждого шарда, обеспечивая корректную маршрутизацию запросов и балансировку нагрузки.
-- В шаблоне конфигурации `config.xml.tpl`:
-  - **Добавлены параметры ограничения сетевой нагрузки на репликацию**:
-    - `<max_replicated_fetches_network_bandwidth_for_server>` — лимит на объём скачивания реплицируемых данных (1 ГБ/с).
-    - `<max_replicated_sends_network_bandwidth_for_server>` — лимит на отправку данных между репликами (512 МБ/с).
-  - **В секции `<merge_tree>`** добавлены и скорректированы ключевые параметры для производительности и надёжности:
-    - `<parts_to_throw_insert>`, `<write_ahead_log_max_bytes>`, `<enable_mixed_granularity_parts>`, `<replication_alter_partitions_sync>` — контроль количества частей, WAL и оптимизация слияний.
-    - `<can_become_leader>` — теперь только первая реплика в каждом шарде может быть лидером (макрос).
-  - **Секция `<compression>`** определяет разные методы сжатия для разных размеров партиций (ZSTD для крупных, LZ4 для остальных).
-  - Все остальные параметры оставлены по best practice для ClickHouse 2024–2025.
-  - Вся настройка находится в каталоге `hw09_replication-lab/terraform/samples/`, запуск производится **без дублирования данных** (используется общий volume из base-infra/clickhouse/volumes).
+---
 
-```xml
-<!-- Лимиты репликации -->
-<max_replicated_fetches_network_bandwidth_for_server>1073741824</max_replicated_fetches_network_bandwidth_for_server> <!-- 1 GB -->
-<max_replicated_sends_network_bandwidth_for_server>536870912</max_replicated_sends_network_bandwidth_for_server> <!-- 512 MB -->
+**Детализация создания новых нод и изменение схемы кластера через main.tf**
 
-<merge_tree>
-    <parts_to_throw_insert>300</parts_to_throw_insert>
-    <min_rows_for_wide_part>0</min_rows_for_wide_part>
-    <min_bytes_for_wide_part>0</min_bytes_for_wide_part>
-    <write_ahead_log_max_bytes>1073741824</write_ahead_log_max_bytes>
-    <enable_mixed_granularity_parts>1</enable_mixed_granularity_parts>
-    <can_become_leader>${node.replica == 1 ? 1 : 0}</can_become_leader>
-    <replication_alter_partitions_sync>2</replication_alter_partitions_sync>
-</merge_tree>
+Для увеличения количества реплик и масштабирования кластера (например, с 2 до 3 реплик на каждый из 2 шардов, всего 6 ClickHouse-нод) в Terraform-конфиге была расширена секция `clickhouse_nodes`:
+
+```hcl
+# ClickHouse-ноды (ручная карта для схемы 2S_3R, с кастомными портами и шардами/репликами)
+clickhouse_nodes = [
+    { name = "clickhouse-01", shard = 1, replica = 1, host = "clickhouse-01", http_port = 8123, tcp_port = 9000 },
+    { name = "clickhouse-02", shard = 2, replica = 1, host = "clickhouse-02", http_port = 8124, tcp_port = 9001 },
+    { name = "clickhouse-03", shard = 1, replica = 2, host = "clickhouse-03", http_port = 8125, tcp_port = 9002 },
+    { name = "clickhouse-04", shard = 2, replica = 2, host = "clickhouse-04", http_port = 8126, tcp_port = 9003 },
+    # Новые реплики:
+    { name = "clickhouse-05", shard = 1, replica = 3, host = "clickhouse-05", http_port = 8127, tcp_port = 9004 },
+    { name = "clickhouse-06", shard = 2, replica = 3, host = "clickhouse-06", http_port = 8128, tcp_port = 9005 },
+]
+```
+Задание массива нод позволяет декларативно и централизованно масштабировать кластер: добавление или удаление реплик/шардов осуществляется простым редактированием этого блока.
+
+Кроме того, для автоматической генерации секции `<remote_servers>` в `config.xml.tpl` формируется структура:
+
+```hcl
+remote_servers = [
+    {
+      shard = 1
+      replicas = [
+        { host = "clickhouse-01", port = 9000 },
+        { host = "clickhouse-03", port = 9002 },
+        { host = "clickhouse-05", port = 9004 },
+      ]
+    },
+    {
+      shard = 2
+      replicas = [
+        { host = "clickhouse-02", port = 9001 },
+        { host = "clickhouse-04", port = 9003 },
+        { host = "clickhouse-06", port = 9005 },
+      ]
+    },
+]
+```
+Эти изменения отражаются во всех автогенерируемых конфигах через Terraform-шаблоны, обеспечивая актуальность конфигурации кластера на каждом этапе.
+
+**Пример полного блока из `main.tf`:**
+```hcl
+clickhouse_nodes = [
+    { name = "clickhouse-01", shard = 1, replica = 1, host = "clickhouse-01", http_port = 8123, tcp_port = 9000 },
+    ...
+    { name = "clickhouse-06", shard = 2, replica = 3, host = "clickhouse-06", http_port = 8128, tcp_port = 9005 },
+]
 ```
 
-- Переменная `clickhouse_base_path` в файле `variables.tf` по умолчанию ссылается на `"../../base-infra/clickhouse/volumes"`. Это обеспечивает использование общих данных и логов без необходимости копирования или дублирования, что упрощает запуск и поддержку кластера.
+**Результат:**  
+- Изменения применяются одной командой `terraform apply`.
+- Новые ноды сразу получают валидный конфиг и автоматически интегрируются в кластер без ручных операций.
+
+> Такой подход облегчает расширение и обслуживание инфраструктуры, позволяет быстро добавлять/удалять реплики и шарды без риска ошибиться в ручных настройках.  
+> Подробнее см. комментарии к секциям `main.tf` в каталоге [`hw09_replication-lab/terraform/main.tf`](./terraform/main.tf).
 
 ---
 
-## Шаг 1. Демонстрационный датасет и описание таблицы `menu`
+**Важные моменты организации кластера:**
+- Кластер поддерживает горизонтальное масштабирование (новые шарды и реплики добавляются через изменение массива в `main.tf`).
+- Сетевые и volume-ресурсы централизованы для удобства сопровождения.
+- Все изменения в конфигурации (шаблон `config.xml.tpl`) распространяются через Terraform на все ноды автоматически.
 
-В качестве демонстрационного используется открытый датасет [NYPL "What's on the menu?"](https://clickhouse.com/docs/en/getting-started/example-datasets/menus) — коллекция исторических меню Нью-Йоркской публичной библиотеки. Для задания нужна только таблица `menu`, структура и загрузка полностью соответствуют официальной документации ClickHouse.
+### Основные изменения и параметры в конфиге (`config.xml.tpl`)
 
-- **Источник:** [NYPL Menu Data](http://menus.nypl.org/data)
-- **Размер:** ~1.3 млн строк, 20 атрибутов, CSV.
-- **Назначение:** Отработка репликации и фоновых процессов на реальных и сложных данных.
+В дополнение к базовой конфигурации были добавлены и оптимизированы параметры (см. `hw09_replication-lab/terraform/samples/config.xml.tpl`). Эти параметры выбраны на основании best-practice ClickHouse для масштабируемых кластеров с высокой нагрузкой и требованиями к отказоустойчивости:
 
-### Подготовка данных к импорту
+- **Ограничения сетевого трафика для репликации:**
+  - `<max_replicated_fetches_network_bandwidth_for_server>1073741824</max_replicated_fetches_network_bandwidth_for_server>`  
+    Ограничивает *входящую* полосу пропускания для fetch-запросов репликации на уровне сервера (1 GB/s). Позволяет контролировать нагрузку на сеть при восстановлении или балансировке больших таблиц, особенно на стендах и в стресс-тестах.  
+    [Документация: network bandwidth settings](https://clickhouse.com/docs/en/operations/server-configuration-parameters/settings/#max_replicated_fetches_network_bandwidth_for_server)
+  - `<max_replicated_sends_network_bandwidth_for_server>536870912</max_replicated_sends_network_bandwidth_for_server>`  
+    Ограничивает *исходящий* трафик для передачи данных репликации (512 MB/s). Важно для предотвращения перегрузки узлов и сбалансированной работы в кластере с несколькими репликами.  
+    [Документация: network bandwidth settings](https://clickhouse.com/docs/en/operations/server-configuration-parameters/settings/#max_replicated_sends_network_bandwidth_for_server)
 
-Датасет взят из официального sample datasets ClickHouse: https://clickhouse.com/docs/getting-started/example-datasets/menus
+- **Параметры MergeTree для больших объёмов:**
+  - `<parts_to_throw_insert>300</parts_to_throw_insert>`  
+    Жёсткий лимит на количество активных частей в таблице — предотвращает деградацию при массовых вставках и партиционировании. При превышении лимита новые вставки будут выброшены с ошибкой, что позволяет выявить проблемы с потоком данных на ранних этапах.  
+    [Документация: Resolving "Too Many Parts" Error in ClickHouse](https://clickhouse.com/docs/ru/knowledgebase/exception-too-many-parts)
+  - `<write_ahead_log_max_bytes>1073741824</write_ahead_log_max_bytes>`  
+    Максимальный размер журнала WAL (Write Ahead Log) — критично для стабильности на больших потоках вставок и восстановления после сбоев.
+  - `<enable_mixed_granularity_parts>1</enable_mixed_granularity_parts>`  
+    Включает поддержку смешанной детализации гранул — рекомендуется для современных версий ClickHouse, ускоряет чтение, оптимизирует хранение.
+  - `<replication_alter_partitions_sync>2</replication_alter_partitions_sync>`  
+    Обеспечивает синхронное выполнение операций ALTER на всех репликах, гарантируя согласованность состояния и предотвращая рассогласование метаданных при schema changes (особенно важно на мульти-шардовых кластерах).
+  - `<can_become_leader>${node.replica == 1 ? 1 : 0}</can_become_leader>`  
+    Только первая реплика в каждом шарде может стать лидером — оптимизация для стабильности, предотвращает коллизии в распределении лидерства (и экономит ресурсы при failover).
 
-**Подготовка данных к импорту полностью автоматизирована с помощью скрипта:**
+- **Секция `<compression>`**  
+  - Использование ZSTD для больших партиций (>1 GB), LZ4 — для всех остальных. Такой паттерн — стандарт для balanc'а скорости и компрессии (см. [документацию ClickHouse по сжатию](https://clickhouse.com/docs/en/operations/server-configuration-compression/)).
 
-```sh
+- **Query Log**  
+  - Логирование в таблицу system.query_log, с flush-интервалом 7.5 сек — удобно для аналитики и отладки.
+
+- **Настройки пользователей, DDL и макросы**  
+  - Макросы shard/replica автоматизированы, используются в пути к таблицам и при создании реплицируемых таблиц.
+
+> Все параметры подбирались с учётом тестирования, опыта эксплуатации продакшн-кластеров и рекомендаций из [официальной документации ClickHouse](https://clickhouse.com/docs/en/), а также комьюнити (Habr, конференции ClickHouse).
+
+---
+
+## Подготовка: создание базы данных и подготовка датасета
+
+### Создание базы данных otus_default на кластере dwh_test
+
+Для всех таблиц используется база данных `otus_default`. Она создаётся на всех нодах кластера с помощью следующей команды, выполненной из `clickhouse-client` на узле `clickhouse-01`:
+
+```sql
+CREATE DATABASE IF NOT EXISTS otus_default ON CLUSTER dwh_test;
+```
+
+---
+
+### Подготовка демонстрационного датасета
+
+В качестве демонстрационного датасета используется открытый набор данных [NYPL "What's on the menu?"](https://clickhouse.com/docs/en/getting-started/example-datasets/menus) — исторические меню Нью-Йоркской публичной библиотеки. Датасет содержит около 1.3 млн строк с 20 атрибутами в формате CSV.
+
+Для автоматизации загрузки подготовлен скрипт:
+
+```bash
 ./scripts/import_menu_dataset.sh
 ```
 
-Скрипт:
-- Cкачивает и распаковывает архив в `data/menusdata_nypl/`
-- Копирует `Menu.csv` в контейнер ClickHouse (в каталог `/var/lib/clickhouse/user_files/menusdata_nypl_dataset/`)
-- Выставляет нужные права на файл
+Скрипт выполняет:  
+- Скачивание и распаковку архива в каталог `data/menusdata_nypl/`.  
+- Копирование файла `Menu.csv` в директорию внутри контейнера ClickHouse `/var/lib/clickhouse/user_files/menusdata_nypl_dataset/`.  
+- Установку необходимых прав доступа на файл.  
 
-Если какой-то этап завершился с ошибкой — будет показано сообщение об ошибке и пошаговые логи.
+> Важно: для загрузки через SQL-команду `INSERT ... INFILE` файл должен находиться в каталоге `/var/lib/clickhouse/user_files/`. Подробнее: [документация ClickHouse](https://clickhouse.com/docs/ru/operations/settings/settings#user_files_path)
 
-Далее для импорта данных используйте SQL-команду:
+---
+
+## Шаг 1. Создание таблицы menu
+
+Таблица создаётся в базе `otus_default` на кластере `dwh_test`. Запрос выполняется из `clickhouse-client` на `clickhouse-01`:
+
+```sql
+CREATE TABLE otus_default.menu ON CLUSTER dwh_test
+(
+    id                   UInt32  COMMENT 'Уникальный идентификатор меню',
+    name                 String  COMMENT 'Название меню или заведения',
+    sponsor              String  COMMENT 'Спонсор или заказчик меню',
+    event                String  COMMENT 'Событие, к которому относится меню',
+    venue                String  COMMENT 'Место проведения события/заведение',
+    place                String  COMMENT 'Описание локации (зал, стол и т.п.)',
+    physical_description String  COMMENT 'Физическое описание меню (тип, особенности оформления)',
+    occasion             String  COMMENT 'Повод или причина создания меню',
+    notes                String  COMMENT 'Дополнительные заметки',
+    call_number          String  COMMENT 'Инвентарный или архивный номер',
+    keywords             String  COMMENT 'Ключевые слова для поиска',
+    language             String  COMMENT 'Язык меню',
+    date                 String  COMMENT 'Дата меню (строкой из источника)',
+    location             String  COMMENT 'Город или адрес',
+    location_type        String  COMMENT 'Тип локации (город, регион и т.д.)',
+    currency             String  COMMENT 'Валюта цен',
+    currency_symbol      String  COMMENT 'Символ валюты',
+    status               String  COMMENT 'Статус или примечание по состоянию меню',
+    page_count           UInt16  COMMENT 'Количество страниц меню',
+    dish_count           UInt16  COMMENT 'Количество блюд в меню'
+)
+ENGINE = MergeTree
+ORDER BY id;
+```
+
+> **Примечание:** каждый столбец снабжён описанием через `COMMENT`, что облегчает понимание структуры таблицы - например, такие описания автоматически пробрасываются в описания в Metabase.
+
+<img src="../screenshots/hw09_replication-and-background-processes/02_create_table_menu.png" alt="Создание таблицы menu" width="600"/>
+
+---
+
+## Шаг 2. Импорт данных в таблицу menu
+
+Для загрузки данных используется следующий запрос, выполненный из `clickhouse-client` на `clickhouse-01`:
 
 ```sql
 INSERT INTO otus_default.menu
+FROM INFILE '/var/lib/clickhouse/user_files/menusdata_nypl_dataset/Menu.csv'
 FORMAT CSVWithNames
-INFILE '/var/lib/clickhouse/user_files/menusdata_nypl_dataset/Menu.csv'
 SETTINGS input_format_csv_allow_single_quotes=0, input_format_null_as_default=0;
 ```
 
-> **Важно:** Для загрузки данных через SQL-команду `INSERT ... INFILE` в новых версиях ClickHouse необходимо, чтобы файл находился именно в каталоге `/var/lib/clickhouse/user_files/`. Подробнее — см. документацию: https://clickhouse.com/docs/ru/operations/settings/settings#user_files_path
+Альтернативно можно использовать:
 
-- Такой подход полностью совместим с кластерной инсталляцией и гарантирует корректную загрузку данных.
-- Если будете использовать `clickhouse-client` для импорта напрямую, не забудьте про параметры `--user` и `--password`.
+```bash
+clickhouse-client --user <user> --password <password> --format_csv_allow_single_quotes 0 --input_format_null_as_default 0 --query "INSERT INTO otus_default.menu FORMAT CSVWithNames" < /var/lib/clickhouse/user_files/menusdata_nypl_dataset/Menu.csv
+```
+
+**Результат:** таблица `menu` наполнена историческими данными NYPL.
+
+<img src="../screenshots/hw09_replication-and-background-processes/03_data_imported.png" alt="Импорт данных в таблицу menu" width="600"/>
 
 ---
 
-### Создание таблицы menu
+## Шаг 3. Конвертация таблицы в реплицируемую и добавление реплик
 
-Структура таблицы:
-
-```sql
-CREATE TABLE menu ON CLUSTER dwh_test
-(
-    id UInt32,
-    name String,
-    sponsor String,
-    event String,
-    venue String,
-    place String,
-    physical_description String,
-    occasion String,
-    notes String,
-    call_number String,
-    keywords String,
-    language String,
-    date String,
-    location String,
-    location_type String,
-    currency String,
-    currency_symbol String,
-    status String,
-    page_count UInt16,
-    dish_count UInt16
-) ENGINE = MergeTree ORDER BY id;
-```
-
-### Загрузка данных в ClickHouse
-
-_Загрузка производится непосредственно из файла `/var/lib/clickhouse/user_files/Menu.csv`, который уже находится на сервере первой ноды._
-
-```sql
-INSERT INTO menu
-FORMAT CSVWithNames
-INFILE '/var/lib/clickhouse/user_files/Menu.csv';
-```
-
-- Используется формат данных CSVWithNames (заголовки из первой строки).
-- Отключён `format_csv_allow_single_quotes` (одинарные кавычки допускаются только внутри значений).
-- Отключён `input_format_null_as_default` (корректная работа с пустыми значениями).
-
-> **Альтернативный способ загрузки через утилиту clickhouse-client:**
->
-> Вы также можете загрузить данные через стандартную утилиту:
->
-> ```bash
-> clickhouse-client --user <your_user> --password <your_password> --format_csv_allow_single_quotes 0 --input_format_null_as_default 0 --query "INSERT INTO menu FORMAT CSVWithNames" < /var/lib/clickhouse/user_files/Menu.csv
-> ```
->
-> Если запускать с той же ноды, путь к файлу будет таким же (`/var/lib/clickhouse/user_files/Menu.csv`).
-
-**Результат:** Таблица menu наполнена реальными историческими данными NYPL — можно переходить к работе с репликацией и фоновыми процессами.
-
----
-
-## Шаг 2. Конвертация таблицы в реплицируемую
-
-Для обеспечения отказоустойчивости сконвертируем таблицу `menu` в реплицируемую с помощью движка `ReplicatedMergeTree` и макросов `{shard}` и `{replica}`.
-
-### 2.1 Создание реплицируемой таблицы
-
-Создадим новую таблицу `menu_replicated` с полной структурой, аналогичной оригинальной:
+Создаём реплицируемую таблицу `menu_replicated` с использованием движка `ReplicatedMergeTree`. Запрос выполняется из `clickhouse-client` на `clickhouse-01`:
 
 ```sql
 CREATE TABLE otus_default.menu_replicated ON CLUSTER dwh_test
@@ -224,182 +277,73 @@ ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/menu_replicated', '{rep
 ORDER BY id;
 ```
 
-<img src="../screenshots/hw09_replication-and-background-processes/04_01_replicated_table_created.png" alt="Создана таблица menu_replicated" width="600"/>
-
-### 2.2 Миграция данных с помощью S3
-
-Для переноса данных используйте повторный импорт из S3 (или, если таблица menu уже заполнена, выполните вставку из неё). Основной рабочий способ для задания — локальный импорт через user_files.
+Далее мигрируем данные из старой таблицы:
 
 ```sql
-INSERT INTO otus_default.menu_replicated
-SELECT * FROM otus_default.menu
-ON CLUSTER dwh_test;
+INSERT INTO otus_default.menu_replicated ON CLUSTER dwh_test
+SELECT * FROM otus_default.menu;
 ```
-
-Если требуется загрузить напрямую из S3:
-
-```sql
-INSERT INTO otus_default.menu_replicated
-SELECT
-    id,
-    name,
-    sponsor,
-    event,
-    venue,
-    place,
-    physical_description,
-    occasion,
-    notes,
-    call_number,
-    keywords,
-    language,
-    date,
-    location,
-    location_type,
-    currency,
-    currency_symbol,
-    status,
-    page_count,
-    dish_count
-FROM s3(
-    'https://<ваш-s3-бакет>/menu.csv',
-    'CSV',
-    'id UInt32,
-     name String,
-     sponsor String,
-     event String,
-     venue String,
-     place String,
-     physical_description String,
-     occasion String,
-     notes String,
-     call_number String,
-     keywords String,
-     language String,
-     date String,
-     location String,
-     location_type String,
-     currency String,
-     currency_symbol String,
-     status String,
-     page_count UInt16,
-     dish_count UInt16'
-)
-ON CLUSTER dwh_test;
-```
-
-> Подробнее о назначении и best practice использования конструкции `ON CLUSTER` для массовых операций вставки/миграции см. примечание выше и [официальную документацию ClickHouse](https://clickhouse.com/docs/en/sql-reference/statements/insert-into#insert-into-on-cluster).
-
-<img src="../screenshots/hw09_replication-and-background-processes/04_02_attach_partitions.png" alt="Загрузка данных в menu_replicated" width="600"/>
-
-### 2.3 Переключение на новую таблицу
-
-После успешной миграции можно использовать `menu_replicated` как основную таблицу. Для этого (если требуется) переименуйте таблицы:
-
-```sql
-RENAME TABLE otus_default.menu TO otus_default.menu_old, 
-             otus_default.menu_replicated TO otus_default.menu
-ON CLUSTER dwh_test;
-```
-
-<img src="../screenshots/hw09_replication-and-background-processes/04_03_exchange_or_rename.png" alt="Переключение на новую таблицу menu" width="600"/>
 
 ---
 
-## Шаг 3. Добавление реплик в кластер
+### Добавление реплик через Terraform
 
-
-### 3.1 Изменение конфигурации Terraform
-
-В файле `base-infra/clickhouse/main.tf` необходимо расширить массив `local.clickhouse_nodes`, добавив новые ноды с уникальными параметрами `name`, `shard`, `replica`, а также указать порты и хосты.
-
-Пример конфигурации с двумя шардами и тремя репликами на каждый шард:
-
-```hcl
-local.clickhouse_nodes = [
-  { name = "clickhouse-01", shard = 1, replica = 1, host = "clickhouse-01", http_port = 8123, tcp_port = 9000 },
-  { name = "clickhouse-02", shard = 1, replica = 2, host = "clickhouse-02", http_port = 8124, tcp_port = 9001 },
-  { name = "clickhouse-03", shard = 1, replica = 3, host = "clickhouse-03", http_port = 8125, tcp_port = 9002 },
-  { name = "clickhouse-04", shard = 2, replica = 1, host = "clickhouse-04", http_port = 8126, tcp_port = 9003 },
-  { name = "clickhouse-05", shard = 2, replica = 2, host = "clickhouse-05", http_port = 8127, tcp_port = 9004 },
-  { name = "clickhouse-06", shard = 2, replica = 3, host = "clickhouse-06", http_port = 8128, tcp_port = 9005 },
-]
-```
-
-### 3.2 Запуск Terraform для применения изменений
-
-Выполнить команду для применения изменений:
+Для добавления реплик необходимо:  
+1. Расширить массив `clickhouse_nodes` в `main.tf`, добавив ноды с параметрами `shard` и `replica`.  
+2. Применить изменения:
 
 ```bash
 terraform apply
 ```
 
-После успешного применения на всех нодах автоматически создадутся необходимые таблицы с правильными путями и макросами.
+После применения на всех нодах автоматически создадутся таблицы с правильными макросами.
 
-### 3.3 Роль ZooKeeper (Keeper) в отказоустойчивости
-
-Для корректной работы репликации требуется кластер из трёх экземпляров ZooKeeper (или ClickHouse Keeper), который обеспечивает согласованное хранение метаданных и координацию реплик. Это критично для обеспечения отказоустойчивости и корректного выбора лидера.
-
-### 3.4 Проверка статуса реплик
-
-Подключаемся к `clickhouse-01` и выполняем запрос для просмотра статуса реплик таблицы `menu`:
-
-```sql
-SELECT *
-FROM system.replicas
-WHERE table = 'menu' AND database = 'otus_default'
-ON CLUSTER dwh_test;
-```
-
+<img src="../screenshots/hw09_replication-and-background-processes/04_01_replicated_table_created.png" alt="Создана таблица menu_replicated" width="600"/>
 <img src="../screenshots/hw09_replication-and-background-processes/05_replicas_added.png" alt="Добавлены реплики в кластер для menu" width="600"/>
 
-Теперь роль лидера в шарде чётко закреплена за первой репликой (`replica == 1`), что ускоряет failover и предотвращает split-brain.
+---
+
+## Шаг 4. Кластерные запросы и проверка репликации
+
+Для проверки распределения частей таблицы и состояния реплик используется Metabase, подключённый к кластеру `dwh_test`. Это позволяет выполнять запросы к распределённому кластеру и видеть актуальное состояние на всех нодах.
 
 ---
 
-## Шаг 4. Проверка состояния репликации и частей таблиц
+### Проверка частей таблицы на всех репликах
 
-### 4.1 Просмотр частей таблицы на всех репликах через `remote()`
-
-Для проверки, что данные распределены по всем репликам, выполняем запрос:
+Запрос в Metabase:
 
 ```sql
-SELECT *
+SELECT getMacro('replica') AS replica, *
 FROM remote(
     ['clickhouse-01','clickhouse-02','clickhouse-03','clickhouse-04','clickhouse-05','clickhouse-06'],
-    'system.parts'
+    system.parts
 )
-WHERE table = 'menu' AND database = 'otus_default';
+WHERE table = 'menu_replicated' AND database = 'otus_default'
+FORMAT JSONEachRow;
 ```
 
-Данный запрос выводит информацию о частях таблицы на всех узлах кластера.
+---
 
-<img src="../screenshots/hw09_replication-and-background-processes/06_01_system_parts_remote.png" alt="system.parts через remote() для menu" width="600"/>
+### Проверка статуса реплик
 
-### 4.2 Просмотр статуса реплик на кластере
-
-Для мониторинга состояния репликации и синхронизации выполняем запрос:
+Запрос в Metabase:
 
 ```sql
 SELECT *
 FROM system.replicas
-WHERE table = 'menu' AND database = 'otus_default'
-ON CLUSTER dwh_test;
+WHERE table = 'menu_replicated' AND database = 'otus_default'
+FORMAT JSONEachRow;
 ```
 
-Вывод содержит информацию о состоянии каждой реплики, включая состояние синхронизации и текущий лидер.
-
-<img src="../screenshots/hw09_replication-and-background-processes/06_02_system_replicas.png" alt="system.replicas на кластере для menu" width="600"/>
+<img src="../screenshots/hw09_replication-and-background-processes/06_01_system_parts_remote.png" alt="system.parts через remote() для menu_replicated" width="600"/>
+<img src="../screenshots/hw09_replication-and-background-processes/06_02_system_replicas.png" alt="system.replicas на кластере для menu_replicated" width="600"/>
 
 ---
 
-## Шаг 5. Настройка TTL для автоматического удаления данных
+## Шаг 5. Добавление колонки date и настройка TTL
 
-Для автоматического удаления устаревших данных можно настроить TTL по дате (например, по колонке `date`, если она преобразована в тип Date или DateTime).
-
-### 5.1 Создание реплицируемой таблицы с TTL
-
-Создадим новую таблицу `menu_replicated_ttl` с TTL по колонке `date` (предварительно преобразовав её в Date, если необходимо):
+Для управления временем жизни данных создаём новую таблицу с колонкой `date` типа `Date` и настройкой TTL. Запрос выполняется из `clickhouse-client` на `clickhouse-01`:
 
 ```sql
 CREATE TABLE otus_default.menu_replicated_ttl ON CLUSTER dwh_test
@@ -430,12 +374,10 @@ ORDER BY id
 TTL date + INTERVAL 7 DAY;
 ```
 
-### 5.2 Миграция данных в новую таблицу
-
-Переносим данные из текущей реплицируемой таблицы:
+Миграция данных с преобразованием строки в дату:
 
 ```sql
-INSERT INTO otus_default.menu_replicated_ttl
+INSERT INTO otus_default.menu_replicated_ttl ON CLUSTER dwh_test
 SELECT
     id,
     name,
@@ -449,7 +391,7 @@ SELECT
     call_number,
     keywords,
     language,
-    parseDateTimeBestEffortOrNull(date) as date,
+    parseDateTimeBestEffortOrNull(date) AS date,
     location,
     location_type,
     currency,
@@ -457,73 +399,58 @@ SELECT
     status,
     page_count,
     dish_count
-FROM otus_default.menu_replicated
-ON CLUSTER dwh_test;
+FROM otus_default.menu_replicated;
 ```
 
-**Примечание по использованию ON CLUSTER для INSERT:**
+---
 
-> В случае массовой миграции или инициализации данных в новую реплицируемую таблицу используем конструкцию `INSERT ... SELECT ... ON CLUSTER dwh_test`, чтобы обеспечить синхронную вставку данных на все узлы кластера. Это предотвращает временные расхождения и позволяет сразу стартовать с одинаковым набором данных на всех репликах. Подробнее: [ClickHouse docs](https://clickhouse.com/docs/en/sql-reference/statements/insert-into#insert-into-on-cluster)
+### Проверка структуры таблицы с TTL
 
-<img src="../screenshots/hw09_replication-and-background-processes/07_ttl_configured.png" alt="Настроен TTL для хранения 7 дней в menu_replicated_ttl" width="600"/>
-
-### 5.3 Проверка структуры таблицы и параметров TTL
-
-Для проверки структуры и настроек выполните:
+Выполнено из Metabase для просмотра результата на всех нодах:
 
 ```sql
 SHOW CREATE TABLE otus_default.menu_replicated_ttl ON CLUSTER dwh_test;
 ```
 
-Данный вывод подтверждает наличие параметров репликации и TTL.
-
 <img src="../screenshots/hw09_replication-and-background-processes/08_show_create_table.png" alt="SHOW CREATE TABLE с TTL и репликацией для menu_replicated_ttl" width="600"/>
-
-### Как работает TTL в кластере
-
-TTL выполняется локально на каждой реплике, удаляя данные старше 7 дней. Удаление происходит асинхронно и независимо на каждой ноде, что позволяет поддерживать актуальность данных без дополнительной нагрузки на кластер.
 
 ---
 
 ## Проверка отказоустойчивости и анализ репликации
 
-### Эксперимент по отключению нод
-
-Для проверки отказоустойчивости можно последовательно отключать ноды кластера и анализировать состояние реплик через запрос:
+Для проверки отказоустойчивости последовательно отключаются ноды кластера. Состояние реплик отслеживается запросом, выполненным из Metabase:
 
 ```sql
 SELECT *
 FROM system.replicas
-WHERE table = 'menu' AND database = 'otus_default'
+WHERE table = 'menu_replicated' AND database = 'otus_default'
 ON CLUSTER dwh_test;
 ```
 
-### Анализ состояния
+---
 
-- При отключении одной из реплик остальные продолжают обслуживать запросы, обеспечивая доступность данных.  
-- В кластере существует лидер (leader) для каждой шарды, который координирует запись данных. При отказе лидера происходит автоматический выбор нового лидера.  
-- Статус реплик отображает их состояние, включая задержки и ошибки.  
+### Анализ наблюдений
 
-### Выводы по отказоустойчивости
-
-- Репликация с использованием `ReplicatedMergeTree` и ZooKeeper обеспечивает высокую доступность и согласованность данных.  
-- Использование трёх Keeper-узлов гарантирует отказоустойчивость метаданных и корректный выбор лидера.  
-- Мониторинг через `system.replicas` позволяет своевременно обнаруживать проблемы и принимать меры.  
+- При отключении отдельных реплик остальные продолжают обслуживать запросы, обеспечивая доступность данных.  
+- Для каждого шарда существует лидер, который координирует операции записи. При отказе лидера происходит автоматический выбор нового лидера.  
+- Статус реплик отображает их состояние, включая задержки и возможные ошибки.  
 
 ---
 
-## Итоговый вывод
+## Общие выводы по заданию
 
-В результате выполнения задания была создана отказоустойчивая реплицируемая таблица с автоматическим удалением устаревших данных. Используется полный реальный набор атрибутов из датасета NYPL, что обеспечивает корректную проверку репликации и TTL в условиях, близких к боевым. Использование макросов `{shard}` и `{replica}` в конфигурации и движках таблиц позволило централизованно управлять кластером. Масштабирование и добавление реплик осуществляется декларативно через Terraform, что упрощает поддержку и развитие инфраструктуры. Настройка TTL обеспечивает автоматическую очистку данных без ручного вмешательства.
+В ходе выполнения задания была создана отказоустойчивая реплицируемая таблица с автоматическим удалением устаревших данных по TTL. Использование макросов `{shard}` и `{replica}` в настройках таблиц и конфигурации позволяет централизованно управлять кластером. Масштабирование и добавление реплик осуществляется декларативно через Terraform, что упрощает сопровождение и развитие инфраструктуры.
 
-Такой подход оптимален для аналитических систем с высокими требованиями к доступности и актуальности данных. В дальнейшем можно улучшить мониторинг, добавить алерты и автоматизировать процессы восстановления.
+Настройка TTL обеспечивает автоматическую очистку данных без ручного вмешательства, что важно для аналитических систем с большими объёмами данных и требованиями к актуальности. Репликация через `ReplicatedMergeTree` и ClickHouse Keeper гарантирует высокую доступность и согласованность данных даже при отказах отдельных нод.
+
+Дальнейшие шаги могут включать улучшение мониторинга, настройку алертов и автоматизацию процессов восстановления.
 
 ---
 
-## Источники
+## Список источников
 
 - [Официальная документация ClickHouse: Репликация](https://clickhouse.com/docs/en/engines/table-engines/mergetree-family/replication/)  
 - [Официальная документация ClickHouse: TTL](https://clickhouse.com/docs/en/sql-reference/statements/create/table/#ttl)  
 - [Документация по мониторингу репликации](https://clickhouse.com/docs/en/operations/system-tables/replicas/)  
-- [ClickHouse Keeper — отказоустойчивый сервис хранения метаданных](https://clickhouse.com/docs/en/operations/server-configuration-keeper/)
+- [ClickHouse Keeper — отказоустойчивый сервис хранения метаданных](https://clickhouse.com/docs/en/operations/server-configuration-keeper/)  
 - [Вставка данных с ON CLUSTER (ClickHouse docs)](https://clickhouse.com/docs/en/sql-reference/statements/insert-into#insert-into-on-cluster)
