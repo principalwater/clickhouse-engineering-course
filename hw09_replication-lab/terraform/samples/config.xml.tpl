@@ -22,8 +22,7 @@
         <min_bytes_for_wide_part>0</min_bytes_for_wide_part>
         <write_ahead_log_max_bytes>1073741824</write_ahead_log_max_bytes> <!-- 1 GB -->
         <enable_mixed_granularity_parts>1</enable_mixed_granularity_parts>
-        <can_become_leader>${node.replica == 1 ? 1 : 0}</can_become_leader> <!-- только для первой реплики в каждом шарде -->
-        <replication_alter_partitions_sync>2</replication_alter_partitions_sync> <!-- синхронный ALTER -->
+        <replicated_can_become_leader>${node.replica == 1 ? 1 : 0}</replicated_can_become_leader> <!-- только для первой реплики в каждом шарде -->
     </merge_tree>
     <compression>
         <case>

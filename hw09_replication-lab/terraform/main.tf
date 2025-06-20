@@ -39,8 +39,8 @@ locals {
     { name = "clickhouse-03", shard = 1, replica = 2, host = "clickhouse-03", http_port = 8125, tcp_port = 9002 },
     { name = "clickhouse-04", shard = 2, replica = 2, host = "clickhouse-04", http_port = 8126, tcp_port = 9003 },
     # Новые реплики:
-    { name = "clickhouse-05", shard = 1, replica = 3, host = "clickhouse-05", http_port = 8127, tcp_port = 9004 },
-    { name = "clickhouse-06", shard = 2, replica = 3, host = "clickhouse-06", http_port = 8128, tcp_port = 9005 },
+    # { name = "clickhouse-05", shard = 1, replica = 3, host = "clickhouse-05", http_port = 8127, tcp_port = 9004 },
+    # { name = "clickhouse-06", shard = 2, replica = 3, host = "clickhouse-06", http_port = 8128, tcp_port = 9005 },
   ]
 
   # Для генерации remote_servers в config.xml.tpl — карта шардов с их репликами
@@ -50,7 +50,7 @@ locals {
       replicas = [
         { host = "clickhouse-01", port = 9000 },
         { host = "clickhouse-03", port = 9002 },
-        { host = "clickhouse-05", port = 9004 },
+        # { host = "clickhouse-05", port = 9004 },
       ]
     },
     {
@@ -58,7 +58,7 @@ locals {
       replicas = [
         { host = "clickhouse-02", port = 9001 },
         { host = "clickhouse-04", port = 9003 },
-        { host = "clickhouse-06", port = 9005 },
+        # { host = "clickhouse-06", port = 9005 },
       ]
     },
   ]

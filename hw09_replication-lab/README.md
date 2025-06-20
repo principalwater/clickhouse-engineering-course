@@ -137,8 +137,12 @@ clickhouse_nodes = [
     Включает поддержку смешанной детализации гранул — рекомендуется для современных версий ClickHouse, ускоряет чтение, оптимизирует хранение.
   - `<replication_alter_partitions_sync>2</replication_alter_partitions_sync>`  
     Обеспечивает синхронное выполнение операций ALTER на всех репликах, гарантируя согласованность состояния и предотвращая рассогласование метаданных при schema changes (особенно важно на мульти-шардовых кластерах).
-  - `<can_become_leader>${node.replica == 1 ? 1 : 0}</can_become_leader>`  
+  - `<replicated_can_become_leader>${node.replica == 1 ? 1 : 0}</replicated_can_become_leader>`  
     Только первая реплика в каждом шарде может стать лидером — оптимизация для стабильности, предотвращает коллизии в распределении лидерства (и экономит ресурсы при failover).
+
+---
+
+После удаления невалидного параметра и корректной настройки лидера репликации контейнеры ClickHouse успешно стартуют, и кластер работает штатно.
 
 - **Секция `<compression>`**  
   - Использование ZSTD для больших партиций (>1 GB), LZ4 — для всех остальных. Такой паттерн — стандарт для balanc'а скорости и компрессии (см. [документацию ClickHouse по сжатию](https://clickhouse.com/docs/en/operations/server-configuration-compression/)).
@@ -154,6 +158,27 @@ clickhouse_nodes = [
 ---
 
 ## Подготовка: создание базы данных и подготовка датасета
+
+### Предварительная подготовка: развёртывание и корректная инициализация пайплайна
+
+Если ранее инфраструктура была развернута через [`base-infra/clickhouse`](../base-infra/clickhouse), перед запуском пайплайна из hw09_replication-lab/terraform необходимо:
+
+1. Перейти в директорию base-infra/clickhouse:
+   ```sh
+   # учитывая, что пользователь уже находится в каталоге hw09_replication-lab
+   cd ../base-infra/clickhouse
+   terraform destroy -auto-approve
+   ```
+   > **Примечание:** При этом директории и данные ClickHouse не удаляются, а удаляется только инфраструктура Docker (контейнеры, сеть и пр.).
+
+2. Затем перейти в директорию с финальным пайплайном:
+   ```sh
+   cd ../../hw09_replication-lab/terraform
+   terraform apply -auto-approve
+   ```
+   > Все последующие apply/расширения кластера необходимо делать уже только из hw09_replication-lab/terraform — это обеспечит корректную работу пайплайна и возможность добавления реплик без конфликтов.
+
+В противном случае возможны конфликты с сетью и именами контейнеров, либо некорректное состояние кластера.
 
 ### Создание базы данных otus_default на кластере dwh_test
 
@@ -189,7 +214,7 @@ CREATE DATABASE IF NOT EXISTS otus_default ON CLUSTER dwh_test;
 Таблица создаётся в базе `otus_default` на кластере `dwh_test`. Запрос выполняется из `clickhouse-client` на `clickhouse-01`:
 
 ```sql
-CREATE TABLE otus_default.menu ON CLUSTER dwh_test
+CREATE TABLE IF NOT EXISTS otus_default.menu ON CLUSTER dwh_test
 (
     id                   UInt32  COMMENT 'Уникальный идентификатор меню',
     name                 String  COMMENT 'Название меню или заведения',
@@ -218,88 +243,153 @@ ORDER BY id;
 
 > **Примечание:** каждый столбец снабжён описанием через `COMMENT`, что облегчает понимание структуры таблицы - например, такие описания автоматически пробрасываются в описания в Metabase.
 
-<img src="../screenshots/hw09_replication-and-background-processes/02_create_table_menu.png" alt="Создание таблицы menu" width="600"/>
+<img src="../screenshots/hw09_replication-lab/01_create_table_menu.png" alt="Создание таблицы menu" width="600"/>
 
 ---
 
 ## Шаг 2. Импорт данных в таблицу menu
 
-Для загрузки данных используется следующий запрос, выполненный из `clickhouse-client` на `clickhouse-01`:
+> ⚠️ **Важно:** В новых версиях ClickHouse параметры формата CSV (`format_csv_*`) применяются только на уровне клиента или конфигурационного файла, а не через `SET` или `SETTINGS` в SQL-запросах. Поэтому загрузка больших локальных файлов CSV с настройками формата производится только через `clickhouse-client` (CLI).
 
-```sql
-INSERT INTO otus_default.menu
-FROM INFILE '/var/lib/clickhouse/user_files/menusdata_nypl_dataset/Menu.csv'
-FORMAT CSVWithNames
-SETTINGS input_format_csv_allow_single_quotes=0, input_format_null_as_default=0;
-```
-
-Альтернативно можно использовать:
+Для загрузки данных используйте следующую команду в `clickhouse-client` на `clickhouse-01`:
 
 ```bash
 clickhouse-client --user <user> --password <password> --format_csv_allow_single_quotes 0 --input_format_null_as_default 0 --query "INSERT INTO otus_default.menu FORMAT CSVWithNames" < /var/lib/clickhouse/user_files/menusdata_nypl_dataset/Menu.csv
 ```
 
+Параметры формата CSV (`--format_csv_allow_single_quotes`, `--input_format_null_as_default` и др.) должны передаваться только через опции CLI или через конфиг клиента.  
+Использование SQL-вариантов с `FROM INFILE` и `SETTINGS` для этих параметров **невозможно** — такие параметры игнорируются или приводят к ошибкам, см. [официальную документацию](https://clickhouse.com/docs/integrations/data-ingestion/insert-local-files).
+
+**Документация:**
+- [Загрузка локальных файлов через clickhouse-client](https://clickhouse.com/docs/integrations/data-ingestion/insert-local-files)
+- [Параметры формата CSV/TSV](https://clickhouse.com/docs/integrations/data-formats/csv-tsv)
+
 **Результат:** таблица `menu` наполнена историческими данными NYPL.
 
-<img src="../screenshots/hw09_replication-and-background-processes/03_data_imported.png" alt="Импорт данных в таблицу menu" width="600"/>
+<img src="../screenshots/hw09_replication-lab/02_data_imported.png" alt="Импорт данных в таблицу menu" width="800"/>
 
 ---
 
 ## Шаг 3. Конвертация таблицы в реплицируемую и добавление реплик
 
-Создаём реплицируемую таблицу `menu_replicated` с использованием движка `ReplicatedMergeTree`. Запрос выполняется из `clickhouse-client` на `clickhouse-01`:
+Для конвертации обычной таблицы в реплицируемую без простоя и с сохранением всех партиций используем оптимальный подход с новым синтаксисом ClickHouse (v24.4+):
 
 ```sql
 CREATE TABLE otus_default.menu_replicated ON CLUSTER dwh_test
-(
-    id UInt32,
-    name String,
-    sponsor String,
-    event String,
-    venue String,
-    place String,
-    physical_description String,
-    occasion String,
-    notes String,
-    call_number String,
-    keywords String,
-    language String,
-    date String,
-    location String,
-    location_type String,
-    currency String,
-    currency_symbol String,
-    status String,
-    page_count UInt16,
-    dish_count UInt16
-)
-ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/menu_replicated', '{replica}')
-ORDER BY id;
+    CLONE AS otus_default.menu
+    ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/menu_replicated', '{replica}')
+    ORDER BY id;
 ```
 
-Далее мигрируем данные из старой таблицы:
+**Результат:** таблица `menu_replicated` создана и наполнена историческими данными NYPL из таблицы `menu`.
 
+<img src="../screenshots/hw09_replication-lab/03_create_table_menu_replicated.png" alt="Импорт данных в таблицу menu" width="600"/>
+
+> **Примечание:**  
+> Данная команда объединяет два действия в один DDL-запрос:
+> - создание таблицы с той же структурой, что и у исходной (AS ...)
+> - автоматическое клонирование всех партиций из оригинала (ATTACH PARTITION ALL FROM ...)
+>
+> Это эквивалентно выполнению двух отдельных запросов:
+> ```
+> CREATE TABLE ... AS ... ENGINE=...;
+> ALTER TABLE ... ATTACH PARTITION ALL FROM ...;
+> ```
+> Используем CLONE, потому что нам важно максимально быстро и надёжно перенести *все* партиции и структуру, без ручного перебора partition_id — это production best practice для миграции таблиц в больших кластерах. Подробнее: [ClickHouse docs: CREATE TABLE ... CLONE](https://clickhouse.com/docs/en/sql-reference/statements/create/table#with-a-schema-and-data-cloned-from-another-table).
+
+Варианты обмена или переименования таблиц (если имя должно остаться прежним) остаются такими же:
+
+- Если требуется оставить старое имя:
+  ```sql
+  EXCHANGE TABLES otus_default.menu_replicated AND otus_default.menu;
+  DROP TABLE otus_default.menu_replicated;
+  ```
+  или
+  ```sql
+  DROP TABLE otus_default.menu;
+  RENAME TABLE otus_default.menu_replicated TO otus_default.menu;
+  ```
+- Если новое имя подходит — просто используем новую таблицу и удаляем старую:
+  ```sql
+  DROP TABLE otus_default.menu;
+  ```
+
+---
+
+### Замечание: миграция данных через CLONE AS ... ON CLUSTER — подводные камни
+
+Хотя команда
 ```sql
-INSERT INTO otus_default.menu_replicated ON CLUSTER dwh_test
-SELECT * FROM otus_default.menu;
+CREATE TABLE ... CLONE AS ... ON CLUSTER ...
 ```
+согласно [официальной документации ClickHouse](https://clickhouse.com/docs/en/sql-reference/statements/create/table#with-a-schema-and-data-cloned-from-another-table)
+должна быть эквивалентна последовательному выполнению
+```sql
+CREATE TABLE ... AS ... ENGINE=...;
+ALTER TABLE ... ATTACH PARTITION ALL FROM ...;
+```
+на практике перенос данных в ReplicatedMergeTree не всегда гарантируется, если исходная таблица на MergeTree была заполнена **отдельно на каждой ноде** (например, скриптом или ручным импортом не через ON CLUSTER).
+
+**Частые проблемы:**
+* Данные могут не появиться в новой таблице вовсе (особенно если исходные партиции были только на одной ноде).
+* Репликация между новыми репликами ReplicatedMergeTree может не инициироваться автоматически — физические партиции не подключаются на всех нодах, и синхронизация не стартует.
+
+**Надёжный способ миграции:**  
+Рекомендуется ЯВНО выполнить команду ATTACH PARTITION ALL FROM ... ON CLUSTER после создания таблицы ReplicatedMergeTree.  
+Пример:
+```sql
+ALTER TABLE otus_default.menu_replicated ON CLUSTER dwh_test ATTACH PARTITION ALL FROM otus_default.menu;
+```
+Это гарантирует физическое подключение всех партиций на всех нодах кластера и корректный запуск механизма репликации между репликами.
+
+Такой подход позволяет:
+- Контролировать процесс миграции — видно, если на какой-то ноде возникла ошибка или отсутствуют данные;
+- Добиться совместимости с разными версиями ClickHouse и разными сценариями наполнения исходной таблицы;
+- Быстро выявить и устранить рассинхронизацию или отсутствие партиций на отдельных репликах.
+
+**Best practice:**  
+При миграции реальных данных с MergeTree → ReplicatedMergeTree на кластере всегда используйте отдельную команду:
+```sql
+ALTER TABLE ... ON CLUSTER ... ATTACH PARTITION ALL FROM ...;
+```
+Это обеспечивает надёжную передачу всех данных и корректную работу ReplicatedMergeTree вне зависимости от истории наполнения исходной таблицы.
 
 ---
 
 ### Добавление реплик через Terraform
+
+#### Важные переменные окружения
+
+Перед запуском Terraform-пайплайна необходимо задать переменные для учётных данных ClickHouse:
+
+```sh
+export TF_VAR_super_user_name="<SUPERUSER_LOGIN>"
+export TF_VAR_super_user_password="<SUPERUSER_PASSWORD>"
+# Для BI-пользователя:
+export TF_VAR_bi_user_password="<BI_USER_PASSWORD>"
+# (TF_VAR_bi_user_name — опционально, по умолчанию 'bi_user')
+```
+
+> ⚠️ Без этих переменных развертывание не будет выполнено корректно.
+
+После завершения работы обязательно очистите чувствительные переменные:
+
+```sh
+unset TF_VAR_super_user_password TF_VAR_bi_user_password
+```
 
 Для добавления реплик необходимо:  
 1. Расширить массив `clickhouse_nodes` в `main.tf`, добавив ноды с параметрами `shard` и `replica`.  
 2. Применить изменения:
 
 ```bash
-terraform apply
+terraform apply -auto-approve
 ```
 
 После применения на всех нодах автоматически создадутся таблицы с правильными макросами.
 
-<img src="../screenshots/hw09_replication-and-background-processes/04_01_replicated_table_created.png" alt="Создана таблица menu_replicated" width="600"/>
-<img src="../screenshots/hw09_replication-and-background-processes/05_replicas_added.png" alt="Добавлены реплики в кластер для menu" width="600"/>
+<img src="../screenshots/hw09_replication-lab/04_01_replicas_added.png" alt="Добавлены реплики в кластер для menu" width="600"/>
+<img src="../screenshots/hw09_replication-lab/04_02_containers_added.png" alt="Добавлены контейнеры в Docker" width="800"/>
 
 ---
 
@@ -315,10 +405,7 @@ terraform apply
 
 ```sql
 SELECT getMacro('replica') AS replica, *
-FROM remote(
-    ['clickhouse-01','clickhouse-02','clickhouse-03','clickhouse-04','clickhouse-05','clickhouse-06'],
-    system.parts
-)
+FROM remote('clickhouse-{01|02|03|04|05|06}', system.parts)
 WHERE table = 'menu_replicated' AND database = 'otus_default'
 FORMAT JSONEachRow;
 ```
@@ -336,8 +423,8 @@ WHERE table = 'menu_replicated' AND database = 'otus_default'
 FORMAT JSONEachRow;
 ```
 
-<img src="../screenshots/hw09_replication-and-background-processes/06_01_system_parts_remote.png" alt="system.parts через remote() для menu_replicated" width="600"/>
-<img src="../screenshots/hw09_replication-and-background-processes/06_02_system_replicas.png" alt="system.replicas на кластере для menu_replicated" width="600"/>
+<img src="../screenshots/hw09_replication-lab/06_01_system_parts_remote.png" alt="system.parts через remote() для menu_replicated" width="600"/>
+<img src="../screenshots/hw09_replication-lab/06_02_system_replicas.png" alt="system.replicas на кластере для menu_replicated" width="600"/>
 
 ---
 
@@ -412,7 +499,7 @@ FROM otus_default.menu_replicated;
 SHOW CREATE TABLE otus_default.menu_replicated_ttl ON CLUSTER dwh_test;
 ```
 
-<img src="../screenshots/hw09_replication-and-background-processes/08_show_create_table.png" alt="SHOW CREATE TABLE с TTL и репликацией для menu_replicated_ttl" width="600"/>
+<img src="../screenshots/hw09_replication-lab/08_show_create_table.png" alt="SHOW CREATE TABLE с TTL и репликацией для menu_replicated_ttl" width="600"/>
 
 ---
 
