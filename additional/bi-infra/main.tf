@@ -230,14 +230,12 @@ for i in {1..24}; do
 done
 
 # --- Проверяем доступность /api/setup (setup_token)
-# Новый способ получения setup_token
 SETUP_TOKEN=$(curl -s -m 5 -X GET \
     -H "Content-Type: application/json" \
     "$METABASE_URL/api/session/properties" \
     | jq -r '."setup-token" // empty')
 if [ -n "$SETUP_TOKEN" ]; then
   echo "Metabase not initialized, performing setup via API"
-  # --- Формируем payload для /api/setup (структура user, prefs как в документации)
   SETUP_PAYLOAD=$(cat <<EOF
 {
   "token": "$SETUP_TOKEN",
@@ -254,22 +252,31 @@ if [ -n "$SETUP_TOKEN" ]; then
 }
 EOF
 )
-  # --- Выполняем setup
   RESPONSE=$(curl -s -X POST \
       -H "Content-type: application/json" \
       "$METABASE_URL/api/setup" \
       -d "$SETUP_PAYLOAD" || true)
-  SESSION_ID=$(echo "$RESPONSE" | jq -r '.id // .session_id // empty')
-  if [ -n "$SESSION_ID" ]; then
-    echo "Metabase setup complete, session: $SESSION_ID"
-  else
-    echo "ERROR: Failed to initialize Metabase via /api/setup"
-    echo "Response: $RESPONSE"
+  # Проверка на специфическую ошибку "The /api/setup route can only be used to create the first user"
+  if echo "$RESPONSE" | grep -q "The /api/setup route can only be used to create the first user"; then
+    echo "Metabase already initialized (api/setup): $RESPONSE"
+    # Переходим к login через /api/session (не завершаем скрипт)
+  elif ! echo "$RESPONSE" | jq . >/dev/null 2>&1; then
+    # Если невалидный JSON и не содержит специфической строки — ошибка
+    echo "ERROR: Invalid JSON received from /api/setup"
+    echo "Raw response: $RESPONSE"
     exit 1
+  else
+    SESSION_ID=$(echo "$RESPONSE" | jq -r '.id // .session_id // empty')
+    if [ -n "$SESSION_ID" ]; then
+      echo "Metabase setup complete, session: $SESSION_ID"
+    else
+      echo "ERROR: Failed to initialize Metabase via /api/setup"
+      echo "Response: $RESPONSE"
+      exit 1
+    fi
   fi
 else
   echo "Metabase already initialized, logging in via /api/session"
-  # --- Логин только по email (username не нужен)
   LOGIN_PAYLOAD=$(cat <<EOF
 {
   "email": "$ADMIN_EMAIL",
@@ -278,6 +285,12 @@ else
 EOF
 )
   RESPONSE=$(curl -sf -X POST "$METABASE_URL/api/session" -H "Content-Type: application/json" -d "$LOGIN_PAYLOAD" || true)
+  # Проверка на валидный JSON
+  if ! echo "$RESPONSE" | jq . >/dev/null 2>&1; then
+    echo "ERROR: Invalid JSON received from /api/session"
+    echo "Raw response: $RESPONSE"
+    exit 1
+  fi
   SESSION_ID=$(echo "$RESPONSE" | jq -r '.id // .session_id // empty')
   if [ -n "$SESSION_ID" ]; then
     echo "Metabase login successful, session: $SESSION_ID"
@@ -294,7 +307,6 @@ echo "$USERS_JSON" | jq -c '.[]' | while read -r user; do
   password=$(echo "$user" | jq -r '.password')
   first_name=$(echo "$user" | jq -r '.first_name')
   last_name=$(echo "$user" | jq -r '.last_name')
-  # .is_superuser может быть null/отсутствовать
   is_superuser=$(echo "$user" | jq -r 'if has("is_superuser") then .is_superuser else empty end')
 
   # --- Не создавать админа повторно
@@ -303,8 +315,14 @@ echo "$USERS_JSON" | jq -c '.[]' | while read -r user; do
     continue
   fi
 
-  # --- Проверяем, существует ли пользователь с таким email
-  EXISTING=$(curl -sf -H "X-Metabase-Session: $SESSION_ID" "$METABASE_URL/api/user" | jq -r '.[] | select(.email=="'"$email"'") | .id' || true)
+  # --- Проверяем, существует ли пользователь с таким email (явная проверка)
+  EXISTING_USERS_JSON=$(curl -sf -H "X-Metabase-Session: $SESSION_ID" "$METABASE_URL/api/user" || true)
+  if ! echo "$EXISTING_USERS_JSON" | jq . >/dev/null 2>&1; then
+    echo "ERROR: Invalid JSON received from /api/user when checking $email"
+    echo "Raw response: $EXISTING_USERS_JSON"
+    continue
+  fi
+  EXISTING=$(echo "$EXISTING_USERS_JSON" | jq -r '.[] | select(.email=="'"$email"'") | .id')
   if [ -n "$EXISTING" ]; then
     echo "User $email already exists (id=$EXISTING), skipping"
     continue
@@ -336,6 +354,11 @@ EOF
 
   # --- Создаём пользователя через API
   CREATE_RESP=$(curl -sf -X POST "$METABASE_URL/api/user" -H "Content-Type: application/json" -H "X-Metabase-Session: $SESSION_ID" -d "$USER_PAYLOAD" || true)
+  if ! echo "$CREATE_RESP" | jq . >/dev/null 2>&1; then
+    echo "ERROR: Invalid JSON received from /api/user on create for $email"
+    echo "Raw response: $CREATE_RESP"
+    continue
+  fi
   if echo "$CREATE_RESP" | grep -q '"email".*already'; then
     echo "User $email already exists (race condition), skipping"
     continue
@@ -343,7 +366,7 @@ EOF
   if [ -z "$(echo "$CREATE_RESP" | jq -r '.id // empty')" ]; then
     echo "ERROR: Failed to create user $email"
     echo "Response: $CREATE_RESP"
-    exit 1
+    continue
   fi
   echo "User $email created"
 done
@@ -376,23 +399,23 @@ resource "null_resource" "init_superset_db" {
   provisioner "local-exec" {
     command = <<EOT
       for i in {1..30}; do
-        docker exec -i postgres pg_isready -U ${var.metabase_pg_user} && break || sleep 3
+        docker exec -i postgres pg_isready -U postgres && break || sleep 3
       done
 
       # Создать роль superset, если не существует (от имени администратора)
-      ROLE_EXISTS=$(docker exec -i postgres psql -U ${var.metabase_pg_user} -d postgres -tc "SELECT 1 FROM pg_roles WHERE rolname = '${var.superset_pg_user}'" | grep -q 1 && echo yes || echo no)
+      ROLE_EXISTS=$(docker exec -i postgres psql -U postgres -d postgres -tc "SELECT 1 FROM pg_roles WHERE rolname = '${var.superset_pg_user}'" | grep -q 1 && echo yes || echo no)
       if [ "$ROLE_EXISTS" = "no" ]; then
-        docker exec -i postgres psql -U ${var.metabase_pg_user} -d postgres -c "CREATE USER ${var.superset_pg_user} WITH PASSWORD '${local.effective_superset_pg_password}';"
+        docker exec -i postgres psql -U postgres -d postgres -c "CREATE USER ${var.superset_pg_user} WITH PASSWORD '${local.effective_superset_pg_password}';"
       fi
 
       # Создать базу superset, если не существует (от имени администратора)
-      DB_EXISTS=$(docker exec -i postgres psql -U ${var.metabase_pg_user} -d postgres -tc "SELECT 1 FROM pg_database WHERE datname = '${var.superset_pg_db}'" | grep -q 1 && echo yes || echo no)
+      DB_EXISTS=$(docker exec -i postgres psql -U postgres -d postgres -tc "SELECT 1 FROM pg_database WHERE datname = '${var.superset_pg_db}'" | grep -q 1 && echo yes || echo no)
       if [ "$DB_EXISTS" = "no" ]; then
-        docker exec -i postgres createdb -U ${var.metabase_pg_user} ${var.superset_pg_db}
+        docker exec -i postgres createdb -U postgres ${var.superset_pg_db}
       fi
 
       # Назначить все права на базу пользователю superset
-      docker exec -i postgres psql -U ${var.metabase_pg_user} -d postgres -c "GRANT ALL PRIVILEGES ON DATABASE ${var.superset_pg_db} TO ${var.superset_pg_user};"
+      docker exec -i postgres psql -U postgres -d postgres -c "GRANT ALL PRIVILEGES ON DATABASE ${var.superset_pg_db} TO ${var.superset_pg_user};"
     EOT
     interpreter = ["/bin/bash", "-c"]
   }
@@ -526,30 +549,51 @@ resource "null_resource" "superset_create_local_users" {
 
     echo "Processing user: $username, admin: $is_admin"
 
-    # Check if user exists
-    EXISTS=$(docker exec superset superset fab list-users | grep -w "$username" || true)
-    echo "User existence check for '$username': $${EXISTS:-not found}"
-
-    if [ -n "$EXISTS" ]; then
-      echo "User $username already exists, skipping creation"
+    # Проверка наличия пользователя через fab list-users
+    set +e
+    docker exec superset superset fab list-users | grep -w "$username" > /dev/null 2>&1
+    USER_EXISTS=$?
+    set -e
+    if [ $USER_EXISTS -eq 0 ]; then
+      echo "User $username already exists in Superset, skipping creation"
       continue
     fi
 
     if [ "$is_admin" = "true" ]; then
       echo "Creating admin user: $username"
+      set +e
       docker exec superset superset fab create-admin \
         --username "$username" \
         --firstname "$first_name" --lastname "$last_name" \
         --email "$username@local" \
         --password "$password"
+      RESULT=$?
+      set -e
+      if [ $RESULT -eq 0 ]; then
+        echo "Admin user $username created successfully"
+      else
+        echo "ERROR: Failed to create admin user $username"
+        # Не прерываем обработку остальных пользователей, кроме критических ошибок
+        continue
+      fi
     else
       echo "Creating regular user: $username with role Gamma"
+      set +e
       docker exec superset superset fab create-user \
         --username "$username" \
         --firstname "$first_name" --lastname "$last_name" \
         --email "$username@local" \
         --password "$password" \
         --role "Gamma"
+      RESULT=$?
+      set -e
+      if [ $RESULT -eq 0 ]; then
+        echo "User $username created successfully"
+      else
+        echo "ERROR: Failed to create user $username"
+        # Не прерываем обработку остальных пользователей, кроме критических ошибок
+        continue
+      fi
     fi
   done
 EOT
