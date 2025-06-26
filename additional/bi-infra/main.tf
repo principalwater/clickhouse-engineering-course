@@ -1,6 +1,6 @@
 ######################################################################
-# ---- Section: Local service enable flags ----
-# Логика выбора сервисов вынесена в locals.tf
+# --- Section: Local service enable flags ---
+# Service selection logic is in locals.tf
 ######################################################################
 terraform {
   required_providers {
@@ -21,7 +21,7 @@ terraform {
 provider "docker" {}
 
 ######################################################################
-# ---- Section: Docker network ----
+# --- Section: Docker Network ---
 ######################################################################
 resource "docker_network" "metanet1" {
   name   = "metanet1"
@@ -29,15 +29,13 @@ resource "docker_network" "metanet1" {
 }
 
 ######################################################################
-# ---- Section: Postgres (image, container) ----
+# --- Section: Postgres - image, container, init_db, restore_if_empty ---
 ######################################################################
 resource "docker_image" "postgres" {
   name = "postgres:${var.postgres_version}"
 }
 
 resource "docker_container" "postgres" {
-  # ---- Контейнер Postgres: только суперпользователь и его пароль ----
-  # Инициализация пользователя/БД для Metabase — только через отдельный блок ниже!
   name     = "postgres"
   image    = docker_image.postgres.name
   hostname = "postgres"
@@ -62,40 +60,35 @@ resource "docker_container" "postgres" {
   }
 }
 ######################################################################
-# ---- Metabase DB/user init (однократно при пустом каталоге pgdata) ----
-# Этот блок создаёт пользователя и базу данных Metabase только если каталог данных Postgres пустой.
-# Миграция и первичная инициализация Metabase БД и пользователя запускаются только один раз при пустом pgdata, после чего больше не выполняются.
+# --- Section: Postgres - Metabase DB/user initialization (one-time if pgdata directory is empty) ---
+# Creates Metabase user and database if data directory is empty.
 ######################################################################
 resource "null_resource" "init_metabase_db" {
-  # ---- Инициализация пользователя Metabase и создание БД, если не существует ----
   provisioner "local-exec" {
     command = <<EOT
-      # Ждать readiness Postgres (до 60 сек)
+      # Wait for Postgres readiness (up to 60 sec)
       for i in {1..30}; do
         docker exec -i postgres pg_isready -U postgres && break || sleep 2
       done
-      # Проверить существование пользователя
+      # Check if user exists
       USER_EXISTS=$(docker exec -i postgres psql -U postgres -d postgres -tc "SELECT 1 FROM pg_roles WHERE rolname = '${var.metabase_pg_user}'" | grep -q 1 && echo yes || echo no)
       if [ "$USER_EXISTS" = "no" ]; then
+        echo "Creating Metabase user: ${var.metabase_pg_user}"
         docker exec -i postgres psql -U postgres -d postgres -c "CREATE USER ${var.metabase_pg_user} WITH PASSWORD '${local.effective_metabase_pg_password}';"
-        echo "Metabase user '${var.metabase_pg_user}' created."
       else
+        echo "Updating password for Metabase user: ${var.metabase_pg_user}"
         docker exec -i postgres psql -U postgres -d postgres -c "ALTER USER ${var.metabase_pg_user} WITH PASSWORD '${local.effective_metabase_pg_password}';"
-        echo "Metabase user '${var.metabase_pg_user}' password updated."
       fi
-      # Проверить существование БД Metabase
+      # Check if Metabase DB exists
       DB_EXISTS=$(docker exec -i postgres psql -U postgres -d postgres -tc "SELECT 1 FROM pg_database WHERE datname = '${var.metabase_pg_db}'" | grep -q 1 && echo yes || echo no)
       if [ "$DB_EXISTS" = "no" ]; then
+        echo "Creating Metabase database: ${var.metabase_pg_db}"
         docker exec -i postgres createdb -U postgres ${var.metabase_pg_db}
-        echo "Metabase database '${var.metabase_pg_db}' created."
-      else
-        echo "Metabase database '${var.metabase_pg_db}' already exists."
       fi
-      # Выдать права CREATE и USAGE на схему public в БД metabase для пользователя metabase
+      # Grant CREATE and USAGE on schema public in metabase DB to metabase user
+      echo "Granting CREATE, USAGE on schema public to ${var.metabase_pg_user} in ${var.metabase_pg_db}"
       docker exec -i postgres psql -U postgres -d ${var.metabase_pg_db} -c "GRANT CREATE, USAGE ON SCHEMA public TO ${var.metabase_pg_user};"
       docker exec -i postgres psql -U postgres -d ${var.metabase_pg_db} -c "GRANT CREATE ON DATABASE ${var.metabase_pg_db} TO ${var.metabase_pg_user};"
-      echo "Granted CREATE, USAGE on schema public and CREATE on database to '${var.metabase_pg_user}'."
-      # Не создаём схемы/таблицы — это делает Metabase при первом запуске
     EOT
     interpreter = ["/bin/bash", "-c"]
   }
@@ -103,8 +96,8 @@ resource "null_resource" "init_metabase_db" {
 }
 
 ######################################################################
-# ---- Postgres restore/инициализация при пустом каталоге ----
-# Этот блок демонстрирует логику проверки необходимости восстановления/инициализации.
+# --- Section: Postgres - Restore/init DB if data directory is empty ---
+# Demonstrates logic for restoring from backup if directory is empty.
 ######################################################################
 resource "null_resource" "postgres_restore_if_empty" {
   count = local.postgres_restore_enabled ? 1 : 0
@@ -123,18 +116,14 @@ EOT
 }
 
 ######################################################################
-# ---- Section: Metabase (image, container) ----
-# Создание ресурсов Metabase зависит от флага var.enable_metabase
+# --- Section: Metabase - image, container, api_init ---
 ######################################################################
 resource "docker_image" "metabase" {
-  # Логика выбора сервиса вынесена в locals.tf
   count = local.metabase_enabled ? 1 : 0
   name  = "metabase/metabase:${var.metabase_version}"
 }
 
 resource "docker_container" "metabase" {
-  # ---- Контейнер Metabase: только переменные для подключения к БД ----
-  # Админ Metabase создаётся через API после запуска (см. ниже).
   count    = local.metabase_enabled ? 1 : 0
   name     = "metabase"
   image    = docker_image.metabase[0].name
@@ -173,26 +162,11 @@ resource "docker_container" "metabase" {
     retries  = 5
   }
 }
-
-
-
 ######################################################################
-# ---- Section: Metabase automation via API (инициализация и пользователи) ----
-# Вся инициализация Metabase и создание пользователей выполняется через API,
-# провайдер Terraform metabase не используется (см. документацию).
-# Это позволяет корректно инициализировать Metabase при headless-запуске с пустой БД.
+# --- Section: Metabase - API automation (initialization and users) ---
+# All Metabase initialization and user creation via API.
 ######################################################################
-
 resource "null_resource" "metabase_api_init" {
-  # Автоматизация: инициализация Metabase и создание пользователей через API.
-  # - Ждёт readiness Metabase (curl /api/health).
-  # - Проверяет, доступен ли /api/setup (наличие setup_token).
-  # - Если доступен, POST /api/setup с параметрами первого пользователя (email, password, first_name, last_name).
-  # - Если уже инициализировано — логин через /api/session (только email).
-  # - Создаёт остальных пользователей через /api/user (только email, password, first_name, last_name, is_superuser если определён).
-  # - Проверяет, если пользователь уже есть — пропускает создание.
-  # - Явная проверка: если SESSION_ID получен — логирует успех, иначе выход с ошибкой.
-  # - USERS_JSON: первым всегда админ principalwater (principalwater@local.com), остальные после.
   count = local.metabase_enabled ? 1 : 0
   provisioner "local-exec" {
     command = <<EOT
@@ -231,11 +205,11 @@ for i in {1..24}; do
   fi
 done
 
-# 2. Проверяем наличие setup-token
+# 2. Check for setup-token
 SETUP_TOKEN=$(curl -sf "$METABASE_URL/api/session/properties" | jq -r '."setup-token" // empty' 2>/dev/null || echo "")
 
 
-# NB: Metabase требует поле username, а не email (2024)
+# NB: Metabase requires username field, not email (2024)
 SESSION_ID=""
 if [ -n "$SETUP_TOKEN" ]; then
   echo "Metabase not initialized, performing setup via API"
@@ -291,7 +265,7 @@ if [ -z "$SESSION_ID" ]; then
   exit 1
 fi
 
-# 3. Создаём остальных пользователей через /api/user
+# 3. Create other users via /api/user
 echo "$USERS_JSON" | jq -c '.[]' | while read -r user; do
   email=$(echo "$user" | jq -r '.email')
   password=$(echo "$user" | jq -r '.password')
@@ -352,11 +326,12 @@ EOT
 }
 
 ######################################################################
-# ---- Section: Superset config ----
-# Создание ресурса зависит от флага var.enable_superset
+# --- Section: Superset - image, config, init_db, container, post_init, create_local_users ---
+######################################################################
+# --- Section: Superset config file ---
+# Generates Superset configuration file.
 ######################################################################
 resource "local_file" "superset_config" {
-  # Логика выбора сервиса вынесена в locals.tf
   count = local.superset_enabled ? 1 : 0
   content = templatefile("${path.module}/samples/superset/superset_config.py.tmpl", {
     superset_secret_key = var.superset_secret_key
@@ -365,51 +340,57 @@ resource "local_file" "superset_config" {
 }
 
 ######################################################################
-# ---- Section: Superset DB init in Postgres ----
-# Создание ресурса зависит от флага var.enable_superset
+# --- Section: Superset DB init in Postgres ---
+# Creates Superset role and database in Postgres.
 ######################################################################
 resource "null_resource" "init_superset_db" {
-  # Логика выбора сервиса вынесена в locals.tf
   count = local.superset_enabled ? 1 : 0
   provisioner "local-exec" {
     command = <<EOT
       for i in {1..30}; do
-        docker exec -i postgres pg_isready -U ${var.metabase_pg_user} && break || sleep 3
+        docker exec -i postgres pg_isready -U postgres && break || sleep 3
       done
 
-      # Создать роль superset, если не существует (от имени администратора)
-      ROLE_EXISTS=$(docker exec -i postgres psql -U ${var.metabase_pg_user} -d postgres -tc "SELECT 1 FROM pg_roles WHERE rolname = '${var.superset_pg_user}'" | grep -q 1 && echo yes || echo no)
+      # Create superset role if it does not exist (as admin)
+      ROLE_EXISTS=$(docker exec -i postgres psql -U postgres -d postgres -tc "SELECT 1 FROM pg_roles WHERE rolname = '${var.superset_pg_user}'" | grep -q 1 && echo yes || echo no)
       if [ "$ROLE_EXISTS" = "no" ]; then
-        docker exec -i postgres psql -U ${var.metabase_pg_user} -d postgres -c "CREATE USER ${var.superset_pg_user} WITH PASSWORD '${local.effective_superset_pg_password}';"
+        echo "Creating Superset user: ${var.superset_pg_user}"
+        docker exec -i postgres psql -U postgres -d postgres -c "CREATE USER ${var.superset_pg_user} WITH PASSWORD '${local.effective_superset_pg_password}';"
+      else
+        echo "Superset user ${var.superset_pg_user} already exists, skipping creation"
       fi
 
-      # Создать базу superset, если не существует (от имени администратора)
-      DB_EXISTS=$(docker exec -i postgres psql -U ${var.metabase_pg_user} -d postgres -tc "SELECT 1 FROM pg_database WHERE datname = '${var.superset_pg_db}'" | grep -q 1 && echo yes || echo no)
+      # Create superset database if it does not exist (as admin)
+      DB_EXISTS=$(docker exec -i postgres psql -U postgres -d postgres -tc "SELECT 1 FROM pg_database WHERE datname = '${var.superset_pg_db}'" | grep -q 1 && echo yes || echo no)
       if [ "$DB_EXISTS" = "no" ]; then
-        docker exec -i postgres createdb -U ${var.metabase_pg_user} ${var.superset_pg_db}
+        echo "Creating Superset database: ${var.superset_pg_db}"
+        docker exec -i postgres createdb -U postgres ${var.superset_pg_db}
+      else
+        echo "Superset database ${var.superset_pg_db} already exists, skipping creation"
       fi
 
-      # Назначить все права на базу пользователю superset
-      docker exec -i postgres psql -U ${var.metabase_pg_user} -d postgres -c "GRANT ALL PRIVILEGES ON DATABASE ${var.superset_pg_db} TO ${var.superset_pg_user};"
+      # Grant all privileges on database to superset user
+      echo "Granting all privileges on ${var.superset_pg_db} to ${var.superset_pg_user}"
+      docker exec -i postgres psql -U postgres -d postgres -c "GRANT ALL PRIVILEGES ON DATABASE ${var.superset_pg_db} TO ${var.superset_pg_user};"
     EOT
     interpreter = ["/bin/bash", "-c"]
   }
-  # Статический depends_on, как требует Terraform: инициализация БД Superset зависит от Postgres
+  # Static depends_on as required by Terraform: Superset DB init depends on Postgres
   depends_on = [docker_container.postgres]
 }
 
 ######################################################################
-# ---- Section: Superset (image, container) ----
-# Создание ресурсов Superset зависит от флага var.enable_superset
+# --- Section: Superset image ---
 ######################################################################
 resource "docker_image" "superset" {
-  # Логика выбора сервиса вынесена в locals.tf
   count = local.superset_enabled ? 1 : 0
   name  = "apache/superset:${var.superset_version}"
 }
 
+######################################################################
+# --- Section: Superset container ---
+######################################################################
 resource "docker_container" "superset" {
-  # Логика выбора сервиса вынесена в locals.tf
   count    = local.superset_enabled ? 1 : 0
   name     = "superset"
   image    = docker_image.superset[0].name
@@ -434,7 +415,7 @@ resource "docker_container" "superset" {
     read_only      = true
   }
   restart = "unless-stopped"
-  # Статический depends_on, как требует Terraform: Superset зависит от Postgres, init_superset_db и superset_config
+  # Static depends_on as required by Terraform: Superset depends on Postgres, init_superset_db, and superset_config
   depends_on = [
     docker_container.postgres,
     null_resource.init_superset_db,
@@ -449,11 +430,10 @@ resource "docker_container" "superset" {
 }
 
 ######################################################################
-# ---- Section: Superset post-init (drivers, admin) ----
-# Создание ресурса зависит от флага var.enable_superset
+# --- Section: Superset post-init (drivers, admin) ---
+# Install drivers and initialize Superset after container launch.
 ######################################################################
 resource "null_resource" "superset_post_init" {
-  # Логика выбора сервиса вынесена в locals.tf
   count = local.superset_enabled ? 1 : 0
   provisioner "local-exec" {
     command     = <<EOT
@@ -463,10 +443,12 @@ resource "null_resource" "superset_post_init" {
       done
 
       # Upgrade pip and install ClickHouse drivers inside Superset container
+      echo "Upgrading pip and installing ClickHouse drivers in Superset container"
       docker exec superset pip install --upgrade pip
       docker exec superset pip install clickhouse-connect clickhouse-driver
 
       # Restart Superset container to load new libraries
+      echo "Restarting Superset container to apply new libraries"
       docker restart superset
 
       # Wait again for Superset to become healthy after restart
@@ -475,6 +457,7 @@ resource "null_resource" "superset_post_init" {
       done
 
       # Initialize Superset database and create admin user (using local effective admin user variables)
+      echo "Initializing Superset database and creating admin user"
       docker exec superset superset db upgrade
       docker exec superset superset init
       docker exec superset superset fab create-admin \
@@ -483,7 +466,7 @@ resource "null_resource" "superset_post_init" {
         --email "${local.effective_superset_sa_username}@local" \
         --password "${local.effective_superset_sa_password}" || true
 
-      # Создание обычных пользователей Superset из переменной local.superset_local_users (роль Gamma по умолчанию, кроме admin)
+      # Create regular Superset users from local.superset_local_users (role Gamma by default, except admin)
       echo '${jsonencode(local.superset_local_users)}' | jq -c '.[]' | while read -r user; do
         username=$(echo "$user" | jq -r '.username')
         password=$(echo "$user" | jq -r '.password')
@@ -495,7 +478,7 @@ resource "null_resource" "superset_post_init" {
           continue
         fi
 
-        echo "Creating regular user: $username"
+        echo "Creating regular Superset user: $username"
         docker exec superset superset fab create-user \
           --username "$username" \
           --firstname "$first_name" --lastname "$last_name" \
@@ -506,16 +489,15 @@ resource "null_resource" "superset_post_init" {
     EOT
     interpreter = ["/bin/bash", "-c"]
   }
-  # Статический depends_on, как требует Terraform: post-init зависит от Superset
+  # Static depends_on as required by Terraform: post-init depends on Superset
   depends_on = [docker_container.superset]
 }
 
 ######################################################################
-# ---- Section: Superset user automation ----
-# Создание ресурса зависит от флага var.enable_superset
+# --- Section: Superset user automation ---
+# Creates Superset users from local.superset_local_users variable.
 ######################################################################
 resource "null_resource" "superset_create_local_users" {
-  # Логика выбора сервиса вынесена в locals.tf
   count = local.superset_enabled ? 1 : 0
   provisioner "local-exec" {
     command = <<EOT
@@ -544,11 +526,6 @@ resource "null_resource" "superset_create_local_users" {
     first_name=$(echo "$user" | jq -r '.first_name')
     last_name=$(echo "$user" | jq -r '.last_name')
     is_admin=$(echo "$user" | jq -r '.is_admin')
-    echo "Parsed username: $username"
-    echo "Parsed password: $password"
-    echo "Parsed first_name: $first_name"
-    echo "Parsed last_name: $last_name"
-    echo "Parsed is_admin: $is_admin"
 
     echo "Processing user: $username, admin: $is_admin"
 
@@ -585,6 +562,6 @@ resource "null_resource" "superset_create_local_users" {
 EOT
     interpreter = ["/bin/bash", "-c"]
   }
-  # Статический depends_on, как требует Terraform: создание пользователей зависит от Superset
+  # Static depends_on as required by Terraform: user creation depends on Superset
   depends_on = [docker_container.superset]
 }

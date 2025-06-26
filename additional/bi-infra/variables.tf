@@ -3,13 +3,13 @@
 
 # ---- Section: Versions and general parameters ----
 variable "postgres_version" {
-  description = "Version of Postgres Docker image"
+  description = "Postgres Docker image version"
   type        = string
   default     = "17.5"
 }
 
 variable "metabase_version" {
-  description = "Version of Metabase Docker image"
+  description = "Metabase Docker image version"
   type        = string
   default     = "v0.55.3"
 }
@@ -21,7 +21,7 @@ variable "metabase_port" {
 }
 
 variable "superset_version" {
-  description = "Version of Superset Docker image"
+  description = "Superset Docker image version"
   type        = string
   default     = "4.1.2"
 }
@@ -34,34 +34,32 @@ variable "superset_port" {
 
 # ---- Section: Postgres database variables for Metabase and Superset ----
 variable "metabase_pg_user" {
-  description = "Username for Metabase DB"
+  description = "Postgres username for Metabase database"
   type        = string
   default     = "metabase"
 }
 
 variable "postgres_restore_enabled" {
-  description = "Выполнять восстановление (или инициализацию) данных Postgres при пустом каталоге pgdata"
+  description = "Enable Postgres data restore or initialization when pgdata directory is empty"
   type        = bool
   default     = true
 }
 
-# No default. Must be set via environment variable or tfvars, or fallback to pg_password (see locals.tf).
 variable "metabase_pg_password" {
-  description = "Password for Metabase DB"
+  description = "Postgres password for Metabase database"
   type        = string
   sensitive   = true
   default     = null
 }
 
 variable "superset_pg_user" {
-  description = "Username for Superset DB"
+  description = "Postgres username for Superset database"
   type        = string
   default     = "superset"
 }
 
-# No default. Must be set via environment variable or tfvars, or fallback to pg_password (see locals.tf).
 variable "superset_pg_password" {
-  description = "Password for Superset DB"
+  description = "Postgres password for Superset database"
   type        = string
   sensitive   = true
   default     = null
@@ -87,99 +85,91 @@ variable "superset_pg_db" {
 
 # ---- Section: Global BI and SA user accounts ----
 variable "sa_username" {
-  description = "Main admin username for Metabase and Superset (no default, must be set explicitly)"
+  description = "Main admin username for Metabase and Superset (must be set explicitly)"
   type        = string
 }
 
 variable "sa_password" {
-  description = "Main admin password for Metabase and Superset (no default, must be set explicitly)"
+  description = "Main admin password for Metabase and Superset (must be set explicitly)"
   type        = string
   sensitive   = true
 }
 
 variable "bi_user" {
-  description = "Main BI user login for Metabase and Superset (default: bi_user)"
+  description = "Main BI user login for Metabase and Superset"
   type        = string
   default     = "bi_user"
 }
 
 variable "bi_password" {
-  description = "Main BI user password for Metabase and Superset (no default, must be set explicitly)"
+  description = "Main BI user password for Metabase and Superset (must be set explicitly)"
   type        = string
   sensitive   = true
 }
 
 # ---- Section: Metabase settings and users ----
 variable "metabase_site_name" {
-  description = "Название сайта Metabase для использования в setup wizard (API инициализация)"
+  description = "Metabase site name for setup wizard (API initialization)"
   type        = string
   default     = "Metabase"
 }
 
 variable "metabase_sa_username" {
-  description = "Admin username for Metabase (fallback: sa_username; handled in locals.tf)"
+  description = "Metabase admin username (fallback: sa_username; handled in locals.tf)"
   type        = string
-  # Not required at launch: used only in fallback logic (see locals.tf)
   default     = null
 }
 
 variable "metabase_sa_password" {
-  description = "Admin password for Metabase (fallback: sa_password; handled in locals.tf)"
+  description = "Metabase admin password (fallback: sa_password; handled in locals.tf)"
   type        = string
   sensitive   = true
-  # Not required at launch: used only in fallback logic (see locals.tf)
   default     = null
 }
 
 variable "metabase_bi_username" {
-  description = "BI username for Metabase (fallback: bi_user; handled in locals.tf)"
+  description = "Metabase BI username (fallback: bi_user; handled in locals.tf)"
   type        = string
-  # Not required at launch: used only in fallback logic (see locals.tf)
   default     = null
 }
 
 variable "metabase_bi_password" {
-  description = "BI user password for Metabase (fallback: bi_password; handled in locals.tf)"
+  description = "Metabase BI user password (fallback: bi_password; handled in locals.tf)"
   type        = string
   sensitive   = true
-  # Not required at launch: used only in fallback logic (see locals.tf)
   default     = null
 }
 
 # ---- Section: Superset settings and users ----
 variable "superset_sa_username" {
-  description = "Admin username for Superset (fallback: sa_username; handled in locals.tf)"
+  description = "Superset admin username (fallback: sa_username; handled in locals.tf)"
   type        = string
-  # Not required at launch: used only in fallback logic (see locals.tf)
   default     = null
 }
 
 variable "superset_sa_password" {
-  description = "Admin password for Superset (fallback: sa_password; handled in locals.tf)"
+  description = "Superset admin password (fallback: sa_password; handled in locals.tf)"
   type        = string
   sensitive   = true
-  # Not required at launch: used only in fallback logic (see locals.tf)
   default     = null
 }
 
 variable "superset_secret_key" {
-  description = "Secret key for Superset security (no default, must be set explicitly)"
+  description = "Secret key for Superset security (must be set explicitly)"
   type        = string
   sensitive   = true
 }
 
 variable "superset_bi_username" {
-  description = "BI username for Superset (fallback: bi_user; handled in locals.tf)"
+  description = "Superset BI username (fallback: bi_user; handled in locals.tf)"
   type        = string
-  # Not required at launch: used only in fallback logic (see locals.tf)
   default     = null
 }
 
 variable "superset_bi_password" {
-  description = "BI user password for Superset (fallback: bi_password; handled in locals.tf)"
+  description = "Superset BI user password (fallback: bi_password; handled in locals.tf)"
   type        = string
   sensitive   = true
-  # Not required at launch: used only in fallback logic (see locals.tf)
   default     = null
 }
 
@@ -215,19 +205,20 @@ EOT
 }
 
 variable "enable_metabase" {
-  description = "Флаг включения Metabase"
+  description = "Flag to enable Metabase"
   type        = bool
   default     = true
 }
 
 variable "enable_superset" {
-  description = "Флаг включения Superset"
+  description = "Flag to enable Superset"
   type        = bool
   default     = true
 }
+
 # ---- Section: Postgres superuser password ----
 variable "postgres_superuser_password" {
-  description = "Пароль суперпользователя (postgres) для контейнера Postgres. Используется для административных задач."
+  description = "Postgres superuser password for administrative tasks in the Postgres container"
   type        = string
   sensitive   = true
   default     = null

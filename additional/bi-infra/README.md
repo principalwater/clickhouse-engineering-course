@@ -19,6 +19,8 @@
 
 В процессе развертывания создаются следующие пользователи в Metabase и Superset. Логика создания пользователей и их данных реализована через `locals.tf` в переменных `locals.metabase_local_users` и `locals.superset_local_users`. Эти локальные переменные используют fallback-логику для значений, позволяя задавать общие креды или отдельные для каждого сервиса.
 
+Если переменные `metabase_local_users` или `superset_local_users` не заданы явно, используются значения по умолчанию с fallback-логикой (см. locals.tf).
+
 ### Принцип fallback-логики для всех кредов
 
 - Для каждого пользователя (админ/BI) можно задать общие переменные:  
@@ -30,9 +32,54 @@
   - Metabase BI: `metabase_bi_username`, `metabase_bi_password`  
   - Superset BI: `superset_bi_username`, `superset_bi_password`  
 - Если специализированные переменные не заданы, используется fallback на общие значения.  
-- Для пароля PostgreSQL базы используется переменная `pg_password`.
+- Для пароля PostgreSQL базы используется переменная `pg_password`.  
+- Для более гибкой кастомизации состава пользователей можно задать переменные `metabase_local_users` и `superset_local_users` напрямую, описывая список пользователей с их параметрами (пример ниже).
 
 Таким образом, можно гибко конфигурировать пользователей и их права для каждого сервиса отдельно, либо использовать общие креды для упрощения.
+
+### Пример задания кастомных пользователей через переменные `*_local_users`
+
+Для Superset:
+
+```
+superset_local_users = [
+  {
+    username   = "superset_admin"
+    password   = "SuperPassword1"
+    first_name = "Ivan"
+    last_name  = "Admin"
+    is_admin   = true
+  },
+  {
+    username   = "superset_bi"
+    password   = "BIPass2"
+    first_name = "Boris"
+    last_name  = "Analyst"
+    is_admin   = false
+  }
+]
+```
+
+Для Metabase:
+
+```
+metabase_local_users = [
+  {
+    username   = "metabase_admin"
+    password   = "MBPassword1"
+    first_name = "Masha"
+    last_name  = "Admin"
+    email      = "metabase_admin@local.com"
+  },
+  {
+    username   = "metabase_bi"
+    password   = "BIMetabase2"
+    first_name = "Ivan"
+    last_name  = "User"
+    email      = "metabase_bi@local.com"
+  }
+]
+```
 
 ### Пользователи:
 
@@ -40,12 +87,12 @@
   — Полные права администратора.  
   — Используется для первичной настройки, управления сервисом, создания подключений и управления другими пользователями.  
   — Логин и пароль задаются через переменные с fallback-логикой (см. выше).  
-  — Автоматически создаётся в обоих сервисах через `locals.metabase_local_users` и `locals.superset_local_users`.
+  — Автоматически создаётся в обоих сервисах через `locals.metabase_local_users` и `locals.superset_local_users`, либо через кастомные переменные `metabase_local_users` и `superset_local_users`, если они заданы.  
 
 - **bi_user** (пользователь BI, имя по умолчанию — `bi_user` или специализированные):  
   — Ограниченные права (только аналитика, построение дашбордов и отчётов).  
   — Имя и пароль задаются через переменные с fallback-логикой (см. выше).  
-  — Автоматически создаётся в обоих сервисах через `locals.metabase_local_users` и `locals.superset_local_users`.
+  — Автоматически создаётся в обоих сервисах через `locals.metabase_local_users` и `locals.superset_local_users`, либо через кастомные переменные `metabase_local_users` и `superset_local_users`, если они заданы.
 
 **Обязательно задайте только те переменные, для которых нет значения по умолчанию (см. variables.tf). Все остальные переменные можно оставить дефолтными или переопределить через tfvars/environment.**
 
@@ -65,17 +112,21 @@
 ```sh
 # Минимальный набор переменных для запуска
 
-export TF_VAR_pg_password="пароль_для_Postgres"              # обязательная переменная, используется как fallback для пользователей
-export TF_VAR_sa_username="имя_админа"                       # обязательная переменная
-export TF_VAR_sa_password="пароль_админа"                    # обязательная переменная
-export TF_VAR_bi_password="пароль_BI_пользователя"           # обязательная переменная
+export TF_VAR_pg_password="пароль_для_Postgres"               # обязательная переменная, используется как fallback для пользователей
+export TF_VAR_sa_username="имя_админа"                        # обязательная переменная
+export TF_VAR_sa_password="пароль_админа"                     # обязательная переменная
+export TF_VAR_bi_password="пароль_BI_пользователя"            # обязательная переменная
 export TF_VAR_superset_secret_key="уникальный_секретный_ключ" # обязательная переменная, без fallback, генерируется пользователем (например, openssl rand -base64 48 | tr -d '\n')
 
 # Опционально можно задать имена пользователей:
-# export TF_VAR_bi_username="bi_user"                        # по умолчанию 'bi_user'
-# export TF_VAR_metabase_sa_username="metabase_admin"        # для изоляции пользователей Metabase
-# export TF_VAR_superset_sa_username="superset_admin"        # для изоляции пользователей Superset
+# export TF_VAR_bi_username="bi_user"                         # по умолчанию 'bi_user'
+# export TF_VAR_metabase_sa_username="metabase_admin"         # для изоляции пользователей Metabase
+# export TF_VAR_superset_sa_username="superset_admin"         # для изоляции пользователей Superset
 # Аналогично для bi_username и паролей.
+
+# Для кастомизации состава пользователей можно задать переменные:
+# export TF_VAR_metabase_local_users='[{"username":"metabase_admin","password":"MBPassword1","first_name":"Masha","last_name":"Admin","email":"metabase_admin@local.com"},{"username":"metabase_bi","password":"BIMetabase2","first_name":"Ivan","last_name":"User","email":"metabase_bi@local.com"}]'
+# export TF_VAR_superset_local_users='[{"username":"superset_admin","password":"SuperPassword1","first_name":"Ivan","last_name":"Admin","is_admin":true},{"username":"superset_bi","password":"BIPass2","first_name":"Boris","last_name":"Analyst","is_admin":false}]'
 
 # Все остальные переменные для Metabase и Superset задавайте только при необходимости кастомизации.
 ```
@@ -92,7 +143,7 @@ additional/bi-infra/
 ├── variables.tf                    # Описание всех переменных с типами и значениями по умолчанию
 ├── locals.tf                       # Локальные переменные с fallback-логикой для пользователей и паролей
 ├── outputs.tf                      # Вывод полезных значений после деплоя (адреса, креды)
-├── README.md                      # Инструкция по установке и настройке
+├── README.md                       # Инструкция по установке и настройке
 └── samples/
     └── superset/
         └── superset_config.py.tmpl # Шаблон конфигурации Superset с секретным ключом
@@ -107,14 +158,20 @@ additional/bi-infra/
 Задайте необходимые переменные окружения в терминале или создайте файл `terraform.tfvars` с нужными значениями. Пример для shell:
 
 ```sh
-export TF_VAR_pg_password="пароль_для_Postgres"              # обязательная переменная
-export TF_VAR_sa_username="имя_админа"                       # обязательная переменная
-export TF_VAR_sa_password="пароль_админа"                    # обязательная переменная
-export TF_VAR_bi_password="пароль_BI_пользователя"           # обязательная переменная
+export TF_VAR_pg_password="пароль_для_Postgres"               # обязательная переменная
+export TF_VAR_sa_username="имя_админа"                        # обязательная переменная
+export TF_VAR_sa_password="пароль_админа"                     # обязательная переменная
+export TF_VAR_bi_password="пароль_BI_пользователя"            # обязательная переменная
 export TF_VAR_superset_secret_key="уникальный_секретный_ключ" # обязательная переменная, генерируется пользователем
 ```
 
-**Важно:** Если хотите разделить креды между Metabase и Superset, задайте специализированные переменные, например:
+> Примечание: Superset требует уникальный секретный ключ для безопасности (обязательное условие, без fallback). Сгенерировать можно командой:
+>
+>   openssl rand -base64 48 | tr -d '\n'
+>
+> Вставьте полученный ключ в переменную TF_VAR_superset_secret_key.
+
+Если хотите разделить креды между Metabase и Superset, задайте специализированные переменные, например:
 
 ```sh
 export TF_VAR_metabase_sa_username="metabase_admin"
@@ -123,21 +180,44 @@ export TF_VAR_superset_sa_username="superset_admin"
 export TF_VAR_superset_sa_password="пароль_superset_admin"
 ```
 
-### 2. Генерация секретного ключа для Superset
-
-Superset требует уникальный секретный ключ для безопасности. Он **не имеет fallback** и должен быть задан обязательно. Сгенерировать его можно командой:
+Для более гибкой настройки состава пользователей можно задать переменные `metabase_local_users` и `superset_local_users` напрямую. Пример:
 
 ```sh
-openssl rand -base64 48 | tr -d '\n' | pbcopy
+export TF_VAR_superset_local_users='[
+  {
+    "username": "superset_admin",
+    "password": "SuperPassword1",
+    "first_name": "Ivan",
+    "last_name": "Admin",
+    "is_admin": true
+  },
+  {
+    "username": "superset_bi",
+    "password": "BIPass2",
+    "first_name": "Boris",
+    "last_name": "Analyst",
+    "is_admin": false
+  }
+]'
+export TF_VAR_metabase_local_users='[
+  {
+    "username": "metabase_admin",
+    "password": "MBPassword1",
+    "first_name": "Masha",
+    "last_name": "Admin",
+    "email": "metabase_admin@local.com"
+  },
+  {
+    "username": "metabase_bi",
+    "password": "BIMetabase2",
+    "first_name": "Ivan",
+    "last_name": "User",
+    "email": "metabase_bi@local.com"
+  }
+]'
 ```
 
-Вставьте полученный ключ в переменную:
-
-```sh
-export TF_VAR_superset_secret_key="сгенерированный_ключ"
-```
-
-### 3. Проверка переменных перед запуском
+### 2. Проверка переменных перед запуском
 
 Перед запуском проверьте, что все необходимые переменные заданы:
 
@@ -164,9 +244,29 @@ terraform init
 terraform apply -auto-approve
 ```
 
+#### Варианты запуска пайплайна
+
+- Запуск обоих сервисов (Metabase и Superset):
+
+  ```sh
+  terraform apply -auto-approve
+  ```
+
+- Запуск только Metabase (Superset отключён):
+
+  ```sh
+  terraform apply -auto-approve -var="enable_metabase=true" -var="enable_superset=false"
+  ```
+
+- Запуск только Superset (Metabase отключён):
+
+  ```sh
+  terraform apply -auto-approve -var="enable_metabase=false" -var="enable_superset=true"
+  ```
+
 > В процессе развертывания автоматически выполняется **пост-инициализация** для обоих сервисов:  
-> - **Superset**: создаётся конфиг с секретным ключом, автоматически добавляются администратор и BI-пользователь (с ролями admin и обычный пользователь) согласно `locals.superset_local_users`.  
-> - **Metabase**: также автоматически создаются пользователи-администраторы и BI-пользователи по заданным логинам/паролям согласно `locals.metabase_local_users` (без ручной регистрации через веб-интерфейс).  
+> - **Superset**: создаётся конфиг с секретным ключом, автоматически добавляются администратор и BI-пользователь (с ролями admin и обычный пользователь) согласно `locals.superset_local_users` или кастомной переменной `superset_local_users`.  
+> - **Metabase**: также автоматически создаются пользователи-администраторы и BI-пользователи по заданным логинам/паролям согласно `locals.metabase_local_users` или кастомной переменной `metabase_local_users` (без ручной регистрации через веб-интерфейс).  
 >   
 > Все параметры аутентификации берутся из переменных окружения или `terraform.tfvars` с fallback-логикой, описанной выше.  
 > Адреса сервисов и учётные данные будут выведены после завершения деплоя.
