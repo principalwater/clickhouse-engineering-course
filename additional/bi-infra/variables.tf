@@ -39,11 +39,18 @@ variable "metabase_pg_user" {
   default     = "metabase"
 }
 
+variable "postgres_restore_enabled" {
+  description = "Выполнять восстановление (или инициализацию) данных Postgres при пустом каталоге pgdata"
+  type        = bool
+  default     = true
+}
+
 # No default. Must be set via environment variable or tfvars, or fallback to pg_password (see locals.tf).
 variable "metabase_pg_password" {
   description = "Password for Metabase DB"
   type        = string
   sensitive   = true
+  default     = null
 }
 
 variable "superset_pg_user" {
@@ -57,6 +64,7 @@ variable "superset_pg_password" {
   description = "Password for Superset DB"
   type        = string
   sensitive   = true
+  default     = null
 }
 
 variable "pg_password" {
@@ -102,6 +110,12 @@ variable "bi_password" {
 }
 
 # ---- Section: Metabase settings and users ----
+variable "metabase_site_name" {
+  description = "Название сайта Metabase для использования в setup wizard (API инициализация)"
+  type        = string
+  default     = "Metabase"
+}
+
 variable "metabase_sa_username" {
   description = "Admin username for Metabase (fallback: sa_username; handled in locals.tf)"
   type        = string
@@ -198,4 +212,23 @@ EOT
     is_admin   = bool
   }))
   default = []
+}
+
+variable "enable_metabase" {
+  description = "Флаг включения Metabase"
+  type        = bool
+  default     = true
+}
+
+variable "enable_superset" {
+  description = "Флаг включения Superset"
+  type        = bool
+  default     = true
+}
+# ---- Section: Postgres superuser password ----
+variable "postgres_superuser_password" {
+  description = "Пароль суперпользователя (postgres) для контейнера Postgres. Используется для административных задач."
+  type        = string
+  sensitive   = true
+  default     = null
 }
