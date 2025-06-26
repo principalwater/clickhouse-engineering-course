@@ -291,7 +291,7 @@ if [ -z "$SESSION_ID" ]; then
   exit 1
 fi
 
-# 3. Создаём остальных пользователей через /api/user (кроме админа principalwater)
+# 3. Создаём остальных пользователей через /api/user
 echo "$USERS_JSON" | jq -c '.[]' | while read -r user; do
   email=$(echo "$user" | jq -r '.email')
   password=$(echo "$user" | jq -r '.password')
@@ -482,6 +482,27 @@ resource "null_resource" "superset_post_init" {
         --firstname "Super" --lastname "User" \
         --email "${local.effective_superset_sa_username}@local" \
         --password "${local.effective_superset_sa_password}" || true
+
+      # Создание обычных пользователей Superset из переменной local.superset_local_users (роль Gamma по умолчанию, кроме admin)
+      echo '${jsonencode(local.superset_local_users)}' | jq -c '.[]' | while read -r user; do
+        username=$(echo "$user" | jq -r '.username')
+        password=$(echo "$user" | jq -r '.password')
+        first_name=$(echo "$user" | jq -r '.first_name')
+        last_name=$(echo "$user" | jq -r '.last_name')
+        is_admin=$(echo "$user" | jq -r '.is_admin')
+
+        if [ "$is_admin" = "true" ]; then
+          continue
+        fi
+
+        echo "Creating regular user: $username"
+        docker exec superset superset fab create-user \
+          --username "$username" \
+          --firstname "$first_name" --lastname "$last_name" \
+          --email "$username@local" \
+          --password "$password" \
+          --role "Gamma" || true
+      done
     EOT
     interpreter = ["/bin/bash", "-c"]
   }
@@ -516,11 +537,18 @@ resource "null_resource" "superset_create_local_users" {
   echo "Superset users JSON: $USERS_JSON"
 
   echo "$USERS_JSON" | jq -c '.[]' | while read -r user; do
+    echo "---- User block ----"
+    echo "Raw user: $user"
     username=$(echo "$user" | jq -r '.username')
     password=$(echo "$user" | jq -r '.password')
     first_name=$(echo "$user" | jq -r '.first_name')
     last_name=$(echo "$user" | jq -r '.last_name')
     is_admin=$(echo "$user" | jq -r '.is_admin')
+    echo "Parsed username: $username"
+    echo "Parsed password: $password"
+    echo "Parsed first_name: $first_name"
+    echo "Parsed last_name: $last_name"
+    echo "Parsed is_admin: $is_admin"
 
     echo "Processing user: $username, admin: $is_admin"
 
@@ -530,25 +558,29 @@ resource "null_resource" "superset_create_local_users" {
 
     if [ -n "$EXISTS" ]; then
       echo "User $username already exists, skipping creation"
+      echo "--------------------"
       continue
     fi
 
     if [ "$is_admin" = "true" ]; then
-      echo "Creating admin user: $username"
+      echo "CMD: docker exec superset superset fab create-admin --username \"$username\" --firstname \"$first_name\" --lastname \"$last_name\" --email \"$username@local\" --password \"*****\""
       docker exec superset superset fab create-admin \
         --username "$username" \
         --firstname "$first_name" --lastname "$last_name" \
         --email "$username@local" \
         --password "$password"
+      echo "Return code: $?"
     else
-      echo "Creating regular user: $username with role Gamma"
+      echo "CMD: docker exec superset superset fab create-user --username \"$username\" --firstname \"$first_name\" --lastname \"$last_name\" --email \"$username@local\" --password \"*****\" --role \"Gamma\""
       docker exec superset superset fab create-user \
         --username "$username" \
         --firstname "$first_name" --lastname "$last_name" \
         --email "$username@local" \
         --password "$password" \
         --role "Gamma"
+      echo "Return code: $?"
     fi
+    echo "--------------------"
   done
 EOT
     interpreter = ["/bin/bash", "-c"]
