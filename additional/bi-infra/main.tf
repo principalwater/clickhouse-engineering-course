@@ -199,15 +199,12 @@ resource "null_resource" "metabase_api_init" {
 set -e
 set -o pipefail
 
-# --- Константы для админа
 METABASE_URL="http://localhost:${var.metabase_port}"
 ADMIN_EMAIL="${local.effective_metabase_sa_username}@local.com"
 ADMIN_PASSWORD="${local.effective_metabase_sa_password}"
 ADMIN_FIRSTNAME="Super"
 ADMIN_LASTNAME="Admin"
 
-# --- Генерация USERS_JSON: первым всегда админ principalwater, остальные после ---
-# Удаляем username у всех пользователей, переставляем principalwater первым
 USERS_JSON=$(jq -c --arg admin_email "$ADMIN_EMAIL" '
   [
     .[] | select(.email == $admin_email)
@@ -218,26 +215,30 @@ USERS_JSON=$(jq -c --arg admin_email "$ADMIN_EMAIL" '
   | map(del(.username))
 ' <<< '${jsonencode(local.metabase_local_users)}')
 
-# --- Ожидание Metabase readiness (до 120 сек)
+# 1. Ждать health API (только status=ok)
 for i in {1..24}; do
-  if curl -sf "$METABASE_URL/api/health" | grep -q '"ok"'; then
+  STATUS=$(curl -sf "$METABASE_URL/api/health" | jq -r '.status // empty' 2>/dev/null || echo "")
+  if [ "$STATUS" = "ok" ]; then
     echo "Metabase is healthy"
     break
   else
     echo "Waiting for Metabase to become healthy..."
     sleep 5
   fi
+  if [ $i -eq 24 ]; then
+    echo "ERROR: Metabase is not healthy after 2 minutes, aborting"
+    exit 1
+  fi
 done
 
-# --- Проверяем доступность /api/setup (setup_token)
-# Новый способ получения setup_token
-SETUP_TOKEN=$(curl -s -m 5 -X GET \
-    -H "Content-Type: application/json" \
-    "$METABASE_URL/api/session/properties" \
-    | jq -r '."setup-token" // empty')
+# 2. Проверяем наличие setup-token
+SETUP_TOKEN=$(curl -sf "$METABASE_URL/api/session/properties" | jq -r '."setup-token" // empty' 2>/dev/null || echo "")
+
+
+# NB: Metabase требует поле username, а не email (2024)
+SESSION_ID=""
 if [ -n "$SETUP_TOKEN" ]; then
   echo "Metabase not initialized, performing setup via API"
-  # --- Формируем payload для /api/setup (структура user, prefs как в документации)
   SETUP_PAYLOAD=$(cat <<EOF
 {
   "token": "$SETUP_TOKEN",
@@ -254,63 +255,61 @@ if [ -n "$SETUP_TOKEN" ]; then
 }
 EOF
 )
-  # --- Выполняем setup
-  RESPONSE=$(curl -s -X POST \
+  RESPONSE=$(curl -sf -X POST \
       -H "Content-type: application/json" \
       "$METABASE_URL/api/setup" \
       -d "$SETUP_PAYLOAD" || true)
   SESSION_ID=$(echo "$RESPONSE" | jq -r '.id // .session_id // empty')
-  if [ -n "$SESSION_ID" ]; then
-    echo "Metabase setup complete, session: $SESSION_ID"
-  else
-    echo "ERROR: Failed to initialize Metabase via /api/setup"
-    echo "Response: $RESPONSE"
-    exit 1
+  # Идемпотентно: если setup повторно, Metabase может вернуть already initialized
+  if [ -z "$SESSION_ID" ]; then
+    # Пробуем логиниться
+    LOGIN_PAYLOAD=$(cat <<EOF
+{
+  "username": "$ADMIN_EMAIL",
+  "password": "$ADMIN_PASSWORD"
+}
+EOF
+)
+    RESPONSE=$(curl -sf -X POST "$METABASE_URL/api/session" -H "Content-Type: application/json" -d "$LOGIN_PAYLOAD" || true)
+    SESSION_ID=$(echo "$RESPONSE" | jq -r '.id // .session_id // empty')
   fi
 else
   echo "Metabase already initialized, logging in via /api/session"
-  # --- Логин только по email (username не нужен)
   LOGIN_PAYLOAD=$(cat <<EOF
 {
-  "email": "$ADMIN_EMAIL",
+  "username": "$ADMIN_EMAIL",
   "password": "$ADMIN_PASSWORD"
 }
 EOF
 )
   RESPONSE=$(curl -sf -X POST "$METABASE_URL/api/session" -H "Content-Type: application/json" -d "$LOGIN_PAYLOAD" || true)
   SESSION_ID=$(echo "$RESPONSE" | jq -r '.id // .session_id // empty')
-  if [ -n "$SESSION_ID" ]; then
-    echo "Metabase login successful, session: $SESSION_ID"
-  else
-    echo "ERROR: Failed to login to Metabase API"
-    echo "Response: $RESPONSE"
-    exit 1
-  fi
 fi
 
-# --- Создаём остальных пользователей через /api/user (кроме админа principalwater)
+if [ -z "$SESSION_ID" ]; then
+  echo "ERROR: No session_id received after setup/login"
+  exit 1
+fi
+
+# 3. Создаём остальных пользователей через /api/user (кроме админа principalwater)
 echo "$USERS_JSON" | jq -c '.[]' | while read -r user; do
   email=$(echo "$user" | jq -r '.email')
   password=$(echo "$user" | jq -r '.password')
   first_name=$(echo "$user" | jq -r '.first_name')
   last_name=$(echo "$user" | jq -r '.last_name')
-  # .is_superuser может быть null/отсутствовать
   is_superuser=$(echo "$user" | jq -r 'if has("is_superuser") then .is_superuser else empty end')
 
-  # --- Не создавать админа повторно
   if [ "$email" = "$ADMIN_EMAIL" ]; then
     echo "Skipping admin user $email"
     continue
   fi
 
-  # --- Проверяем, существует ли пользователь с таким email
   EXISTING=$(curl -sf -H "X-Metabase-Session: $SESSION_ID" "$METABASE_URL/api/user" | jq -r '.[] | select(.email=="'"$email"'") | .id' || true)
   if [ -n "$EXISTING" ]; then
     echo "User $email already exists (id=$EXISTING), skipping"
     continue
   fi
 
-  # --- Формируем payload для /api/user только с нужными полями
   if [ -n "$is_superuser" ] && [ "$is_superuser" != "null" ]; then
     USER_PAYLOAD=$(cat <<EOF
 {
@@ -334,16 +333,15 @@ EOF
 )
   fi
 
-  # --- Создаём пользователя через API
   CREATE_RESP=$(curl -sf -X POST "$METABASE_URL/api/user" -H "Content-Type: application/json" -H "X-Metabase-Session: $SESSION_ID" -d "$USER_PAYLOAD" || true)
   if echo "$CREATE_RESP" | grep -q '"email".*already'; then
     echo "User $email already exists (race condition), skipping"
     continue
   fi
   if [ -z "$(echo "$CREATE_RESP" | jq -r '.id // empty')" ]; then
-    echo "ERROR: Failed to create user $email"
+    echo "WARNING: Failed to create user $email (non-fatal)"
     echo "Response: $CREATE_RESP"
-    exit 1
+    continue
   fi
   echo "User $email created"
 done
