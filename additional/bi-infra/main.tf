@@ -17,41 +17,8 @@ terraform {
 
 provider "docker" {}
 
-locals {
-  metabase_local_users = [
-    {
-      username   = var.metabase_sa_username
-      password   = var.metabase_sa_password
-      first_name = "Admin"
-      last_name  = "User"
-    },
-    {
-      username   = var.metabase_bi_username
-      password   = var.metabase_bi_password
-      first_name = "BI"
-      last_name  = "User"
-    }
-  ]
-  superset_local_users = [
-    {
-      username   = var.superset_sa_username
-      password   = var.superset_sa_password
-      first_name = "Admin"
-      last_name  = "User"
-      is_admin   = true
-    },
-    {
-      username   = var.superset_bi_username
-      password   = var.superset_bi_password
-      first_name = "BI"
-      last_name  = "User"
-      is_admin   = false
-    }
-  ]
-}
-
 ######################################################################
-# Docker network setup
+# ---- Section: Docker network ----
 ######################################################################
 resource "docker_network" "metanet1" {
   name   = "metanet1"
@@ -59,7 +26,7 @@ resource "docker_network" "metanet1" {
 }
 
 ######################################################################
-# PostgreSQL Docker image and container setup
+# ---- Section: Postgres (image, container) ----
 ######################################################################
 resource "docker_image" "postgres" {
   name = "postgres:${var.postgres_version}"
@@ -89,7 +56,7 @@ resource "docker_container" "postgres" {
 }
 
 ######################################################################
-# Metabase Docker image and container setup
+# ---- Section: Metabase (image, container) ----
 ######################################################################
 resource "docker_image" "metabase" {
   name = "metabase/metabase:${var.metabase_version}"
@@ -131,49 +98,57 @@ resource "docker_container" "metabase" {
 }
 
 ######################################################################
-# Automate creation of local Metabase BI users
+# ---- Section: Metabase user automation ----
+# Using local.metabase_local_users and local effective usernames/passwords from locals.tf
 ######################################################################
 resource "null_resource" "metabase_create_local_users" {
   provisioner "local-exec" {
     command = <<EOT
-      # Wait for Metabase to become healthy (up to 150 seconds)
-      for i in {1..30}; do
-        curl --fail -I http://localhost:${var.metabase_port}/api/health && break || sleep 5
-      done
-
       # Authenticate as Metabase admin to get session token
-      SESSION_TOKEN=$(curl -s -X POST http://localhost:${var.metabase_port}/api/session -H "Content-Type: application/json" -d '{
-        "username": "${var.metabase_sa_username}",
-        "password": "${var.metabase_sa_password}"
+      SESSION_TOKEN=$(curl -s -X POST http://localhost:3000/api/session -H "Content-Type: application/json" -d '{
+        "username": "${local.effective_metabase_sa_username}",
+        "password": "${local.effective_metabase_sa_password}"
       }' | jq -r '.id')
 
-      # Loop through local users JSON, skip admin (already exists), create others via API
-      USERS_JSON='${jsonencode(local.metabase_local_users)}'
-      echo "$USERS_JSON" | jq -c '.[]' | while read -r user; do
-        username=$(echo "$user" | jq -r '.username')
-        password=$(echo "$user" | jq -r '.password')
-        first_name=$(echo "$user" | jq -r '.first_name')
-        last_name=$(echo "$user" | jq -r '.last_name')
+      # Check if BI user already exists by username
+      BI_USERNAME="${local.effective_metabase_bi_username}"
+      USER_EXISTS=$(curl -s -H "X-Metabase-Session: $SESSION_TOKEN" http://localhost:3000/api/user | jq -r --arg username "$BI_USERNAME" '.[] | select(.username == $username) | .id // empty')
 
-        # Skip admin user since it's created during superset_post_init or manually
-        if [ "$username" = "${var.metabase_sa_username}" ]; then
-          continue
+      if [ -z "$USER_EXISTS" ]; then
+        # Find BI user details from local.metabase_local_users by username
+        USER_DATA=$(echo '${jsonencode(local.metabase_local_users)}' | jq -c --arg username "$BI_USERNAME" '.[] | select(.username == $username)')
+
+        if [ -n "$USER_DATA" ]; then
+          EMAIL=$(echo "$USER_DATA" | jq -r '.username + "@local"')
+          PASSWORD=$(echo "$USER_DATA" | jq -r '.password')
+          FIRST_NAME=$(echo "$USER_DATA" | jq -r '.first_name')
+          LAST_NAME=$(echo "$USER_DATA" | jq -r '.last_name')
+
+          # Create BI user via Metabase API
+          CREATE_USER_PAYLOAD=$(jq -n \
+            --arg email "$EMAIL" \
+            --arg password "$PASSWORD" \
+            --arg firstName "$FIRST_NAME" \
+            --arg lastName "$LAST_NAME" \
+            '{email: $email, password: $password, firstName: $firstName, lastName: $lastName}')
+
+          curl -s -X POST http://localhost:3000/api/user \
+            -H "Content-Type: application/json" \
+            -H "X-Metabase-Session: $SESSION_TOKEN" \
+            -d "$CREATE_USER_PAYLOAD"
+        else
+          echo "BI user details not found in local.metabase_local_users for username: $BI_USERNAME"
+          exit 1
         fi
+      else
+        echo "BI user '$BI_USERNAME' already exists with id $USER_EXISTS"
+      fi
 
-        # Create user via Metabase API with session token for authorization
-        curl -s -X POST http://localhost:${var.metabase_port}/api/user \
-          -H "Content-Type: application/json" \
-          -H "X-Metabase-Session: $SESSION_TOKEN" \
-          -d '{
-            "email": "'"${username}@local"'",
-            "password": "'"${password}"'",
-            "firstName": "'"${first_name}"'",
-            "lastName": "'"${last_name}"'"
-          }'
-
-        # Optionally, assign groups to user via API here
-        # curl -s -X POST http://localhost:${var.metabase_port}/api/user/${user_id}/group -H "X-Metabase-Session: $SESSION_TOKEN" -d '{"groupId": group_id}'
-      done
+      # Disable initial setup wizard
+      curl -s -X PUT http://localhost:3000/api/setup/admin \
+        -H "Content-Type: application/json" \
+        -H "X-Metabase-Session: $SESSION_TOKEN" \
+        -d '{"setupComplete": true}'
     EOT
     interpreter = ["/bin/bash", "-c"]
   }
@@ -181,7 +156,7 @@ resource "null_resource" "metabase_create_local_users" {
 }
 
 ######################################################################
-# Superset configuration file generation
+# ---- Section: Superset config ----
 ######################################################################
 resource "local_file" "superset_config" {
   content = templatefile("${path.module}/samples/superset/superset_config.py.tmpl", {
@@ -191,19 +166,25 @@ resource "local_file" "superset_config" {
 }
 
 ######################################################################
-# Initialize Superset database and user in PostgreSQL
+# ---- Section: Superset DB init in Postgres ----
 ######################################################################
 resource "null_resource" "init_superset_db" {
   provisioner "local-exec" {
-    command     = <<EOT
-      # Create Superset database if it does not exist (using Superset Postgres metadata user credentials)
-      docker exec -i postgres psql -U ${var.superset_pg_user} -tc "SELECT 1 FROM pg_database WHERE datname = '${var.superset_pg_db}'" | grep -q 1 || \
-        docker exec -i postgres createdb -U ${var.superset_pg_user} ${var.superset_pg_db}
-      # Create Superset user if it does not exist
-      docker exec -i postgres psql -U ${var.superset_pg_user} -tc "SELECT 1 FROM pg_roles WHERE rolname = '${var.superset_pg_user}'" | grep -q 1 || \
-        docker exec -i postgres psql -U ${var.superset_pg_user} -c "CREATE USER ${var.superset_pg_user} WITH PASSWORD '${var.superset_pg_password}';"
-      # Grant all privileges on Superset database to the Superset user
-      docker exec -i postgres psql -U ${var.superset_pg_user} -c "GRANT ALL PRIVILEGES ON DATABASE ${var.superset_pg_db} TO ${var.superset_pg_user};"
+    command = <<EOT
+      # Создать роль superset, если не существует (от имени администратора)
+      ROLE_EXISTS=$(docker exec -i postgres psql -U ${var.metabase_pg_user} -d postgres -tc "SELECT 1 FROM pg_roles WHERE rolname = '${var.superset_pg_user}'" | grep -q 1 && echo yes || echo no)
+      if [ "$ROLE_EXISTS" = "no" ]; then
+        docker exec -i postgres psql -U ${var.metabase_pg_user} -d postgres -c "CREATE USER ${var.superset_pg_user} WITH PASSWORD '${var.superset_pg_password}';"
+      fi
+
+      # Создать базу superset, если не существует (от имени администратора)
+      DB_EXISTS=$(docker exec -i postgres psql -U ${var.metabase_pg_user} -tc "SELECT 1 FROM pg_database WHERE datname = '${var.superset_pg_db}'" | grep -q 1 && echo yes || echo no)
+      if [ "$DB_EXISTS" = "no" ]; then
+        docker exec -i postgres createdb -U ${var.metabase_pg_user} ${var.superset_pg_db}
+      fi
+
+      # Назначить все права на базу пользователю superset
+      docker exec -i postgres psql -U ${var.metabase_pg_user} -d postgres -c "GRANT ALL PRIVILEGES ON DATABASE ${var.superset_pg_db} TO ${var.superset_pg_user};"
     EOT
     interpreter = ["/bin/bash", "-c"]
   }
@@ -211,7 +192,7 @@ resource "null_resource" "init_superset_db" {
 }
 
 ######################################################################
-# Superset Docker image and container setup
+# ---- Section: Superset (image, container) ----
 ######################################################################
 resource "docker_image" "superset" {
   name = "apache/superset:${var.superset_version}"
@@ -255,7 +236,8 @@ resource "docker_container" "superset" {
 }
 
 ######################################################################
-# Superset post-initialization automation
+# ---- Section: Superset post-init (drivers, admin) ----
+# Using local effective admin username/password from locals.tf
 ######################################################################
 resource "null_resource" "superset_post_init" {
   provisioner "local-exec" {
@@ -277,14 +259,14 @@ resource "null_resource" "superset_post_init" {
         docker exec superset curl -sf http://localhost:8088/health && break || sleep 5
       done
 
-      # Initialize Superset database and create admin user (using BI app login user variables)
+      # Initialize Superset database and create admin user (using local effective admin user variables)
       docker exec superset superset db upgrade
       docker exec superset superset init
       docker exec superset superset fab create-admin \
-        --username "${var.superset_sa_username}" \
+        --username "${local.effective_superset_sa_username}" \
         --firstname "Super" --lastname "User" \
-        --email "${var.superset_sa_username}@local" \
-        --password "${var.superset_sa_password}" || true
+        --email "${local.effective_superset_sa_username}@local" \
+        --password "${local.effective_superset_sa_password}" || true
     EOT
     interpreter = ["/bin/bash", "-c"]
   }
@@ -292,11 +274,13 @@ resource "null_resource" "superset_post_init" {
 }
 
 ######################################################################
-# Automate creation of local Superset BI users
+# ---- Section: Superset user automation ----
+# Using local.superset_local_users and local effective usernames/passwords from locals.tf
 ######################################################################
 resource "null_resource" "superset_create_local_users" {
   provisioner "local-exec" {
     command = <<EOT
+      # Automatic creation of admin and BI users with unified credentials from locals.tf.
       # Wait for Superset to become healthy (up to 150 seconds)
       for i in {1..30}; do
         docker exec superset curl -sf http://localhost:8088/health && break || sleep 5
