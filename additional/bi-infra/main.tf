@@ -65,7 +65,7 @@ resource "docker_container" "postgres" {
 ######################################################################
 resource "null_resource" "init_metabase_db" {
   provisioner "local-exec" {
-    command = <<EOT
+    command     = <<EOT
       # Wait for Postgres readiness (up to 60 sec)
       for i in {1..30}; do
         docker exec -i postgres pg_isready -U postgres && break || sleep 2
@@ -102,7 +102,7 @@ resource "null_resource" "init_metabase_db" {
 resource "null_resource" "postgres_restore_if_empty" {
   count = local.postgres_restore_enabled ? 1 : 0
   provisioner "local-exec" {
-    command = <<EOT
+    command     = <<EOT
 if [ -z "$(ls -A "${path.module}/../../base-infra/clickhouse/volumes/pgdata" 2>/dev/null)" ]; then
   echo "Postgres data dir empty. Restore needed."
   # Здесь должна быть команда восстановления из backup (например, pg_restore ...), требует дополнительного задания.
@@ -169,7 +169,7 @@ resource "docker_container" "metabase" {
 resource "null_resource" "metabase_api_init" {
   count = local.metabase_enabled ? 1 : 0
   provisioner "local-exec" {
-    command = <<EOT
+    command     = <<EOT
 set -e
 set -o pipefail
 
@@ -346,7 +346,7 @@ resource "local_file" "superset_config" {
 resource "null_resource" "init_superset_db" {
   count = local.superset_enabled ? 1 : 0
   provisioner "local-exec" {
-    command = <<EOT
+    command     = <<EOT
       for i in {1..30}; do
         docker exec -i postgres pg_isready -U postgres && break || sleep 3
       done
@@ -500,7 +500,7 @@ resource "null_resource" "superset_post_init" {
 resource "null_resource" "superset_create_local_users" {
   count = local.superset_enabled ? 1 : 0
   provisioner "local-exec" {
-    command = <<EOT
+    command     = <<EOT
   set -e
   set -x
 

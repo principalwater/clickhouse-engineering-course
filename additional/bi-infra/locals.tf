@@ -58,6 +58,6 @@ locals {
   ]
 
   # Service enable flags
-  metabase_enabled  = var.enable_metabase
-  superset_enabled  = var.enable_superset
+  metabase_enabled = var.enable_metabase
+  superset_enabled = var.enable_superset
 }
