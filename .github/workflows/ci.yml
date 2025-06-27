@@ -45,14 +45,13 @@ jobs:
       run:
         shell: bash
     env:
-      BI_USER_PASSWORD: ${{ secrets.BI_USER_PASSWORD }}
       CLICKHOUSE_BI_USER_PASSWORD: ${{ secrets.CLICKHOUSE_BI_USER_PASSWORD }}
       CLICKHOUSE_SUPER_USER_PASSWORD: ${{ secrets.CLICKHOUSE_SUPER_USER_PASSWORD }}
-      METABASE_PG_PASSWORD: ${{ secrets.METABASE_PG_PASSWORD }}
-      SUPERSET_PG_PASSWORD: ${{ secrets.SUPERSET_PG_PASSWORD }}
-      SUPERSET_SA_PASSWORD: ${{ secrets.SUPERSET_SA_PASSWORD }}
+      PG_PASSWORD: ${{ secrets.PG_PASSWORD }}
+      SA_USERNAME: ${{ secrets.SA_USERNAME }}
+      SA_PASSWORD: ${{ secrets.SA_PASSWORD }}
+      BI_PASSWORD: ${{ secrets.BI_PASSWORD }}
       SUPERSET_SECRET_KEY: ${{ secrets.SUPERSET_SECRET_KEY }}
-      SUPER_USER_PASSWORD: ${{ secrets.SUPER_USER_PASSWORD }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
