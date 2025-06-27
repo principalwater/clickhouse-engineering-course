@@ -35,6 +35,12 @@ jobs:
           printf '%s\n' "${clean_dirs[@]}" | jq -R . | jq -s . | tr -d ' \n' > tf_dirs.json
           echo "tf_dirs=$(cat tf_dirs.json)" >> $GITHUB_OUTPUT
 
+      - name: Inspect tf_dirs.json
+        run: |
+          # Вывод содержимого tf_dirs.json для проверки
+          echo "[INSPECT] Contents of tf_dirs.json:"
+          cat tf_dirs.json
+
   terraform:
     needs: find-terraform-dirs
     runs-on: ubuntu-latest
@@ -79,24 +85,40 @@ jobs:
               fi
             done
           fi
+          echo "[LOAD VARS] Loaded variables: $VARS"  # Комментарий: вывод загруженных переменных
           echo "vars=$VARS" >> $GITHUB_OUTPUT
 
       - name: Terraform Init
-        run: terraform init -backend=false
+        run: |
+          set -ex  # Включить подробный вывод и прерывание при ошибках
+          echo "[TF INIT] Running terraform init in ${{ matrix.dir }}"  # Перед init
+          terraform init -backend=false
+          echo "[TF INIT] Completed terraform init"  # После init
         working-directory: ${{ matrix.dir }}
 
       - name: Terraform Validate
-        run: terraform validate
+        run: |
+          set -ex  # Включить подробный вывод и прерывание при ошибках
+          echo "[TF VALIDATE] Running terraform validate in ${{ matrix.dir }}"  # Перед validate
+          terraform validate
+          echo "[TF VALIDATE] Completed terraform validate"  # После validate
         working-directory: ${{ matrix.dir }}
 
       - name: Terraform Format Check
-        run: terraform fmt -check
+        run: |
+          set -ex  # Включить подробный вывод и прерывание при ошибках
+          echo "[TF FMT] Running terraform fmt -check in ${{ matrix.dir }}"  # Перед fmt
+          terraform fmt -check
+          echo "[TF FMT] Completed terraform fmt -check"  # После fmt
         working-directory: ${{ matrix.dir }}
 
       - name: Terraform Plan
         run: |
+          set -ex  # Включить подробный вывод и прерывание при ошибках
+          echo "[TF PLAN] Running terraform plan in ${{ matrix.dir }}"  # Перед plan
           terraform plan -out=tfplan ${{ steps.load-vars.outputs.vars }}
           terraform show -no-color tfplan > plan.txt
+          echo "[TF PLAN] Completed terraform plan and saved plan.txt"  # После plan
         working-directory: ${{ matrix.dir }}
 
       - name: Sanitize artifact name
