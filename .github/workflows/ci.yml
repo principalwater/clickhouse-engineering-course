@@ -52,6 +52,7 @@ jobs:
         shell: bash
     env:
       BI_PASSWORD: ${{ secrets.BI_PASSWORD }}
+      BI_USER_PASSWORD: ${{ secrets.BI_USER_PASSWORD }}
       CLICKHOUSE_BI_USER_PASSWORD: ${{ secrets.CLICKHOUSE_BI_USER_PASSWORD }}
       CLICKHOUSE_SUPER_USER_PASSWORD: ${{ secrets.CLICKHOUSE_SUPER_USER_PASSWORD }}
       METABASE_PG_PASSWORD: ${{ secrets.METABASE_PG_PASSWORD }}
