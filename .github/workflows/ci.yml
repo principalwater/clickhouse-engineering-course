@@ -4,10 +4,10 @@ on:
   workflow_dispatch: {}           # Ручной запуск с любой ветки для теста
   pull_request:
     branches:
-      - main                     # Авто-проверка при создании PR на main
+      - master                    # Авто-проверка при создании PR на master
   push:
     branches:
-      - main                     # Авто-проверка после мерджа в main
+      - master                    # Авто-проверка после мерджа в master
 
 jobs:
   find-terraform-dirs:
