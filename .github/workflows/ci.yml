@@ -74,7 +74,23 @@ jobs:
         run: |
           VARS=""
           if [ -f "${{ matrix.dir }}/variables.tf" ]; then
+            # Получить список sensitive переменных с default-значением
+            defaults=()
+            while read -r line; do
+              defaults+=("$line")
+            done < <(awk '
+              BEGIN { var=""; sensitive=0; has_default=0; }
+              /variable / { if (var && sensitive && has_default) print var; var=$2; sensitive=0; has_default=0; }
+              /sensitive *= *true/ { sensitive=1; }
+              /default *=/ { has_default=1; }
+              END { if (var && sensitive && has_default) print var; }
+            ' "${{ matrix.dir }}/variables.tf" | tr -d '"{}')
             for var in $(awk '/variable /{gsub(/["{}]/,"",$2); name=$2} /sensitive *=[^=]*true/ {print name}' "${{ matrix.dir }}/variables.tf"); do
+              skip=0
+              for d in "${defaults[@]}"; do
+                if [ "$var" = "$d" ]; then skip=1; break; fi
+              done
+              [ "$skip" = "1" ] && continue
               # Ищем любой секрет, совпадающий по имени (регистронезависимо)
               env_name=$(env | grep -i "^${var}=" | cut -d= -f1 | head -n1)
               if [ -z "$env_name" ]; then
