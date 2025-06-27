@@ -72,56 +72,52 @@ jobs:
       - name: Load sensitive variables from variables.tf
         id: load-vars
         run: |
-          # Передаём в terraform все обязательные переменные (без default) и все sensitive без default
-          VARS=""
-          if [ -f "${{ matrix.dir }}/variables.tf" ]; then
-            sensitive_no_default=()
-            all_no_default=()
-            # Получить список sensitive переменных без default
-            while read -r var; do
-              sensitive_no_default+=("$var")
-            done < <(awk '
-              BEGIN { var=""; sensitive=0; has_default=0; }
-              /variable / { if (var && sensitive && !has_default) print var; var=$2; sensitive=0; has_default=0; }
-              /sensitive *= *true/ { sensitive=1; }
-              /default *=/ { has_default=1; }
-              END { if (var && sensitive && !has_default) print var; }
-            ' "${{ matrix.dir }}/variables.tf" | tr -d '"{}')
-
-            # Получить список всех переменных без default
-            while read -r var; do
-              all_no_default+=("$var")
-            done < <(awk '
-              BEGIN { var=""; has_default=0; }
-              /variable / { if (var && !has_default) print var; var=$2; has_default=0; }
-              /default *=/ { has_default=1; }
-              END { if (var && !has_default) print var; }
-            ' "${{ matrix.dir }}/variables.tf" | tr -d '"{}')
-
-            # Объединяем списки, исключая дубликаты
-            combined=()
-            declare -A seen=()
-            for v in "${sensitive_no_default[@]}" "${all_no_default[@]}"; do
-              if [ -z "${seen[$v]}" ]; then
-                combined+=("$v")
-                seen[$v]=1
-              fi
-            done
-
-            for var in "${combined[@]}"; do
-              # Ищем любой секрет, совпадающий по имени (регистронезависимо)
-              env_name=$(env | grep -i "^${var}=" | cut -d= -f1 | head -n1)
-              if [ -z "$env_name" ]; then
-                env_name=$(env | grep -i "^$(echo "$var" | tr '[:lower:]' '[:upper:]')=" | cut -d= -f1 | head -n1)
-              fi
-              if [ -n "$env_name" ]; then
-                val=$(printenv "$env_name")
-                VARS="$VARS -var=$var=\"$val\""
-              fi
-            done
-          fi
-          echo "[LOAD VARS] Loaded variables: $VARS"  # Комментарий: вывод загруженных переменных
-          echo "vars=$VARS" >> $GITHUB_OUTPUT
+           set +e  # Отключить немедленный выход для отладки ошибок
+           VARS=""
+           if [ -f "${{ matrix.dir }}/variables.tf" ]; then
+             sensitive_no_default=()
+             all_no_default=()
+             # Получить список sensitive переменных без default
+             while read -r var; do
+               sensitive_no_default+=("$var")
+             done < <(awk '
+               BEGIN { var=""; sensitive=0; has_default=0; }
+               /variable / { if (var && sensitive && !has_default) print var; var=$2; sensitive=0; has_default=0; }
+               /sensitive *= *true/ { sensitive=1; }
+               /default *=/ { has_default=1; }
+               END { if (var && sensitive && !has_default) print var; }
+             ' "${{ matrix.dir }}/variables.tf" | tr -d '"{}')
+             # Получить список всех переменных без default
+             while read -r var; do
+               all_no_default+=("$var")
+             done < <(awk '
+               BEGIN { var=""; has_default=0; }
+               /variable / { if (var && !has_default) print var; var=$2; has_default=0; }
+               /default *=/ { has_default=1; }
+               END { if (var && !has_default) print var; }
+             ' "${{ matrix.dir }}/variables.tf" | tr -d '"{}')
+             # Объединяем списки, исключая дубликаты
+             combined=()
+             declare -A seen=()
+             for v in "${sensitive_no_default[@]}" "${all_no_default[@]}"; do
+               if [ -z "${seen[$v]}" ]; then
+                 combined+=("$v")
+                 seen[$v]=1
+               fi
+             done
+             for var in "${combined[@]}"; do
+               env_name=$(env | grep -i "^${var}=" | cut -d= -f1 | head -n1 || true)
+               if [ -z "$env_name" ]; then
+                 env_name=$(env | grep -i "^$(echo "$var" | tr '[:lower:]' '[:upper:]')=" | cut -d= -f1 | head -n1 || true)
+               fi
+               if [ -n "$env_name" ]; then
+                 val=$(printenv "$env_name" || true)
+                 VARS="$VARS -var=$var=\"$val\""
+               fi
+             done
+           fi
+           echo "[LOAD VARS] Loaded variables: $VARS"
+           echo "vars=$VARS" >> $GITHUB_OUTPUT
 
       - name: Terraform Init
         run: |
