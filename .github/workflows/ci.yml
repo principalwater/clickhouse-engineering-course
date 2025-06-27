@@ -64,6 +64,8 @@ jobs:
       - name: Load sensitive variables from variables.tf
         id: load-vars
         run: |
+          set -euo pipefail
+          set -x
           VARS=""
           if [ -f "${{ matrix.dir }}/variables.tf" ]; then
             for var in $(awk '/variable /{gsub(/["{}]/,"",$2); name=$2} /sensitive *=[^=]*true/ {print name}' "${{ matrix.dir }}/variables.tf"); do
@@ -75,32 +77,52 @@ jobs:
               if [ -n "$env_name" ]; then
                 val=$(printenv "$env_name")
                 VARS="$VARS -var=$var=\"$val\""
+                echo "Loaded secret for $var from env $env_name"
+              else
+                echo "WARNING: Secret for $var is not set in env!" >&2
               fi
             done
           fi
           echo "vars=$VARS" >> $GITHUB_OUTPUT
 
       - name: Terraform Init
-        run: terraform init -backend=false
+        run: |
+          set -euo pipefail
+          set -x
+          terraform init -backend=false
+          echo "Step Terraform Init completed successfully"
         working-directory: ${{ matrix.dir }}
 
       - name: Terraform Validate
-        run: terraform validate
+        run: |
+          set -euo pipefail
+          set -x
+          terraform validate
+          echo "Step Terraform Validate completed successfully"
         working-directory: ${{ matrix.dir }}
 
       - name: Terraform Format Check
-        run: terraform fmt -check
+        run: |
+          set -euo pipefail
+          set -x
+          terraform fmt -check
+          echo "Step Terraform Format Check completed successfully"
         working-directory: ${{ matrix.dir }}
 
       - name: Terraform Plan
         run: |
+          set -euo pipefail
+          set -x
           terraform plan -out=tfplan ${{ steps.load-vars.outputs.vars }}
           terraform show -no-color tfplan > plan.txt
+          echo "Step Terraform Plan completed successfully"
         working-directory: ${{ matrix.dir }}
 
       - name: Sanitize artifact name
         id: sanitize
         run: |
+          set -euo pipefail
+          set -x
           dir="${{ matrix.dir }}"
           dir_sanitized=$(echo "$dir" | sed 's#^\./##' | tr '/.' '-' )
           echo "dir_sanitized=$dir_sanitized" >> $GITHUB_OUTPUT
@@ -124,9 +146,12 @@ jobs:
 
       - name: Find and check Python scripts syntax
         run: |
+          set -euo pipefail
+          set -x
           # Найти все .py-файлы, не игнорируемые .gitignore и не приватные
           git ls-files '*.py' ':!:additional/bi-infra/**/superset_config.py' ':!:additional/bi-infra/**/*config.py' ':!:additional/bi-infra/**/*secret.py' \
             | while read -r file; do
                 echo "Проверка синтаксиса: $file"
                 python -m py_compile "$file"
+                echo "Linted file: $file"
               done
