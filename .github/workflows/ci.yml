@@ -51,7 +51,6 @@ jobs:
       run:
         shell: bash
     env:
-      BI_USER_PASSWORD: ${{ secrets.BI_USER_PASSWORD }}
       BI_PASSWORD: ${{ secrets.BI_PASSWORD }}
       CLICKHOUSE_BI_USER_PASSWORD: ${{ secrets.CLICKHOUSE_BI_USER_PASSWORD }}
       CLICKHOUSE_SUPER_USER_PASSWORD: ${{ secrets.CLICKHOUSE_SUPER_USER_PASSWORD }}
