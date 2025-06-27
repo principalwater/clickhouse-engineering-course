@@ -59,6 +59,9 @@ jobs:
       SUPERSET_SA_PASSWORD: ${{ secrets.SUPERSET_SA_PASSWORD }}
       SUPERSET_SECRET_KEY: ${{ secrets.SUPERSET_SECRET_KEY }}
       SUPER_USER_PASSWORD: ${{ secrets.SUPER_USER_PASSWORD }}
+      PG_PASSWORD: ${{ secrets.PG_PASSWORD }}
+      SA_USERNAME: ${{ secrets.SA_USERNAME }}
+      SA_PASSWORD: ${{ secrets.SA_PASSWORD }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
