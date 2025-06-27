@@ -1,13 +1,13 @@
 name: Terraform & Python Lint CI
 
 on:
-  workflow_dispatch: {}           # Ручной запуск с любой ветки для теста
+  workflow_dispatch: {}           # Manual trigger from any branch for testing.
   pull_request:
     branches:
-      - main                     # Авто-проверка при создании PR на main
+      - master                    # Automatic check on PR creation targeting master.
   push:
     branches:
-      - main                     # Авто-проверка после мерджа в main
+      - master                    # Automatic check after merge to master.
 
 jobs:
   find-terraform-dirs:
@@ -21,11 +21,11 @@ jobs:
       - name: Find Terraform directories
         id: set-dirs
         run: |
-          # Найти все папки с main.tf, исключая игнорируемые .gitignore
+          # Find all directories containing main.tf files, excluding those ignored by .gitignore.
           mapfile -t dirs < <(find . -type f -name 'main.tf' \
             | grep -vFf <(git check-ignore $(find . -type f -name 'main.tf') 2>/dev/null || true) \
             | xargs -I {} dirname {} | sort -u)
-          echo "Найдены Terraform директории:"
+          echo "Found Terraform directories:"
           printf '%s\n' "${dirs[@]}"
           clean_dirs=()
           for d in "${dirs[@]}"; do
@@ -34,6 +34,12 @@ jobs:
           done
           printf '%s\n' "${clean_dirs[@]}" | jq -R . | jq -s . | tr -d ' \n' > tf_dirs.json
           echo "tf_dirs=$(cat tf_dirs.json)" >> $GITHUB_OUTPUT
+
+      - name: Inspect tf_dirs.json
+        run: |
+          # Display the contents of tf_dirs.json for verification.
+          echo "[INSPECT] Contents of tf_dirs.json:"
+          cat tf_dirs.json
 
   terraform:
     needs: find-terraform-dirs
@@ -45,12 +51,13 @@ jobs:
       run:
         shell: bash
     env:
+      BI_PASSWORD: ${{ secrets.BI_PASSWORD }}
       BI_USER_PASSWORD: ${{ secrets.BI_USER_PASSWORD }}
       CLICKHOUSE_BI_USER_PASSWORD: ${{ secrets.CLICKHOUSE_BI_USER_PASSWORD }}
       CLICKHOUSE_SUPER_USER_PASSWORD: ${{ secrets.CLICKHOUSE_SUPER_USER_PASSWORD }}
-      METABASE_PG_PASSWORD: ${{ secrets.METABASE_PG_PASSWORD }}
-      SUPERSET_PG_PASSWORD: ${{ secrets.SUPERSET_PG_PASSWORD }}
-      SUPERSET_SA_PASSWORD: ${{ secrets.SUPERSET_SA_PASSWORD }}
+      PG_PASSWORD: ${{ secrets.PG_PASSWORD }}
+      SA_PASSWORD: ${{ secrets.SA_PASSWORD }}
+      SA_USERNAME: ${{ secrets.SA_USERNAME }}
       SUPERSET_SECRET_KEY: ${{ secrets.SUPERSET_SECRET_KEY }}
       SUPER_USER_PASSWORD: ${{ secrets.SUPER_USER_PASSWORD }}
     steps:
@@ -65,38 +72,84 @@ jobs:
       - name: Load sensitive variables from variables.tf
         id: load-vars
         run: |
-          VARS=""
-          if [ -f "${{ matrix.dir }}/variables.tf" ]; then
-            for var in $(awk '/variable /{gsub(/["{}]/,"",$2); name=$2} /sensitive *=[^=]*true/ {print name}' "${{ matrix.dir }}/variables.tf"); do
-              # Ищем любой секрет, совпадающий по имени (регистронезависимо)
-              env_name=$(env | grep -i "^${var}=" | cut -d= -f1 | head -n1)
-              if [ -z "$env_name" ]; then
-                env_name=$(env | grep -i "^$(echo "$var" | tr '[:lower:]' '[:upper:]')=" | cut -d= -f1 | head -n1)
-              fi
-              if [ -n "$env_name" ]; then
-                val=$(printenv "$env_name")
-                VARS="$VARS -var=$var=\"$val\""
-              fi
-            done
-          fi
-          echo "vars=$VARS" >> $GITHUB_OUTPUT
+           set +e  # Disable immediate exit to allow debugging errors.
+           VARS=""
+           if [ -f "${{ matrix.dir }}/variables.tf" ]; then
+             sensitive_no_default=()
+             all_no_default=()
+             # Extract sensitive variables without default values.
+             while read -r var; do
+               sensitive_no_default+=("$var")
+             done < <(awk '
+               BEGIN { var=""; sensitive=0; has_default=0; }
+               /variable / { if (var && sensitive && !has_default) print var; var=$2; sensitive=0; has_default=0; }
+               /sensitive *= *true/ { sensitive=1; }
+               /default *=/ { has_default=1; }
+               END { if (var && sensitive && !has_default) print var; }
+             ' "${{ matrix.dir }}/variables.tf" | tr -d '"{}')
+             # Extract all variables without default values.
+             while read -r var; do
+               all_no_default+=("$var")
+             done < <(awk '
+               BEGIN { var=""; has_default=0; }
+               /variable / { if (var && !has_default) print var; var=$2; has_default=0; }
+               /default *=/ { has_default=1; }
+               END { if (var && !has_default) print var; }
+             ' "${{ matrix.dir }}/variables.tf" | tr -d '"{}')
+             # Combine lists and remove duplicates.
+             combined=()
+             declare -A seen=()
+             for v in "${sensitive_no_default[@]}" "${all_no_default[@]}"; do
+               if [ -z "${seen[$v]}" ]; then
+                 combined+=("$v")
+                 seen[$v]=1
+               fi
+             done
+             for var in "${combined[@]}"; do
+               env_name=$(env | grep -i "^${var}=" | cut -d= -f1 | head -n1 || true)
+               if [ -z "$env_name" ]; then
+                 env_name=$(env | grep -i "^$(echo "$var" | tr '[:lower:]' '[:upper:]')=" | cut -d= -f1 | head -n1 || true)
+               fi
+               if [ -n "$env_name" ]; then
+                 val=$(printenv "$env_name" || true)
+                 VARS="$VARS -var=$var=\"$val\""
+               fi
+             done
+           fi
+           echo "[LOAD VARS] Loaded variables: $VARS"
+           echo "vars=$VARS" >> $GITHUB_OUTPUT
 
       - name: Terraform Init
-        run: terraform init -backend=false
+        run: |
+          set -ex  # Enable detailed output and stop on errors.
+          echo "[TF INIT] Running terraform init in ${{ matrix.dir }}"  # Before init.
+          terraform init -backend=false
+          echo "[TF INIT] Completed terraform init"  # After init.
         working-directory: ${{ matrix.dir }}
 
       - name: Terraform Validate
-        run: terraform validate
+        run: |
+          set -ex  # Enable detailed output and stop on errors.
+          echo "[TF VALIDATE] Running terraform validate in ${{ matrix.dir }}"  # Before validate.
+          terraform validate
+          echo "[TF VALIDATE] Completed terraform validate"  # After validate.
         working-directory: ${{ matrix.dir }}
 
       - name: Terraform Format Check
-        run: terraform fmt -check
+        run: |
+          set -ex  # Enable detailed output and stop on errors.
+          echo "[TF FMT] Running terraform fmt -check in ${{ matrix.dir }}"  # Before fmt.
+          terraform fmt -check
+          echo "[TF FMT] Completed terraform fmt -check"  # After fmt.
         working-directory: ${{ matrix.dir }}
 
       - name: Terraform Plan
         run: |
+          set -ex  # Enable detailed output and stop on errors.
+          echo "[TF PLAN] Running terraform plan in ${{ matrix.dir }}"  # Before plan.
           terraform plan -out=tfplan ${{ steps.load-vars.outputs.vars }}
           terraform show -no-color tfplan > plan.txt
+          echo "[TF PLAN] Completed terraform plan and saved plan.txt"  # After plan.
         working-directory: ${{ matrix.dir }}
 
       - name: Sanitize artifact name
@@ -125,9 +178,18 @@ jobs:
 
       - name: Find and check Python scripts syntax
         run: |
-          # Найти все .py-файлы, не игнорируемые .gitignore и не приватные
+          # Find all .py files not ignored by .gitignore and excluding private config files.
           git ls-files '*.py' ':!:additional/bi-infra/**/superset_config.py' ':!:additional/bi-infra/**/*config.py' ':!:additional/bi-infra/**/*secret.py' \
             | while read -r file; do
-                echo "Проверка синтаксиса: $file"
+                echo "Checking syntax: $file"
                 python -m py_compile "$file"
               done
+
+      - name: Find and check shell script syntax
+        run: |
+          # Find all shell scripts (.sh) not ignored by .gitignore and validate syntax with 'bash -n'.
+          # Fail the job if any script has syntax errors to prevent issues during CI.
+          git ls-files '*.sh' | while read -r file; do
+            echo "Checking syntax: $file"
+            bash -n "$file"
+          done
