@@ -29,39 +29,59 @@ locals {
   keeper_nodes = [
     { name = "clickhouse-keeper-01", id = 1, host = "clickhouse-keeper-01", tcp_port = 9181, raft_port = 9234 },
     { name = "clickhouse-keeper-02", id = 2, host = "clickhouse-keeper-02", tcp_port = 9181, raft_port = 9234 },
-    { name = "clickhouse-keeper-03", id = 3, host = "clickhouse-keeper-03", tcp_port = 9181, raft_port = 9234 },
+    { name = "clickhouse-keeper-03", id = 3, host = "clickhouse-keeper-03", tcp_port = 9181, raft_port = 9234 }
   ]
 
-  # ClickHouse-ноды (ручная карта для схемы 2S_2R, с кастомными портами и шардами/репликами)
-  clickhouse_nodes = [
-    { name = "clickhouse-01", shard = 1, replica = 1, host = "clickhouse-01", http_port = 8123, tcp_port = 9000 },
-    { name = "clickhouse-02", shard = 2, replica = 1, host = "clickhouse-02", http_port = 8124, tcp_port = 9001 },
-    { name = "clickhouse-03", shard = 1, replica = 2, host = "clickhouse-03", http_port = 8125, tcp_port = 9002 },
-    { name = "clickhouse-04", shard = 2, replica = 2, host = "clickhouse-04", http_port = 8126, tcp_port = 9003 },
-    # Новые реплики:
-    # { name = "clickhouse-05", shard = 1, replica = 3, host = "clickhouse-05", http_port = 8127, tcp_port = 9004 },
-    # { name = "clickhouse-06", shard = 2, replica = 3, host = "clickhouse-06", http_port = 8128, tcp_port = 9005 },
+  # ClickHouse-ноды (разделяем на базовые и новые для поэтапного развертывания)
+  base_clickhouse_nodes = [
+    { name = "clickhouse-01", shard = 1, replica = 1, host = "clickhouse-01", http_port = var.use_standard_ports ? var.ch_http_port : 8123, tcp_port = var.use_standard_ports ? var.ch_tcp_port : 9000 },
+    { name = "clickhouse-02", shard = 2, replica = 1, host = "clickhouse-02", http_port = var.use_standard_ports ? var.ch_http_port : 8124, tcp_port = var.use_standard_ports ? var.ch_tcp_port : 9001 },
+    { name = "clickhouse-03", shard = 1, replica = 2, host = "clickhouse-03", http_port = var.use_standard_ports ? var.ch_http_port : 8125, tcp_port = var.use_standard_ports ? var.ch_tcp_port : 9002 },
+    { name = "clickhouse-04", shard = 2, replica = 2, host = "clickhouse-04", http_port = var.use_standard_ports ? var.ch_http_port : 8126, tcp_port = var.use_standard_ports ? var.ch_tcp_port : 9003 },
   ]
 
-  # Для генерации remote_servers в config.xml.tpl — карта шардов с их репликами
+  new_clickhouse_nodes = [
+    # Новые реплики, добавляемые на втором этапе:
+    { name = "clickhouse-05", shard = 1, replica = 3, host = "clickhouse-05", http_port = var.use_standard_ports ? var.ch_http_port : 8127, tcp_port = var.use_standard_ports ? var.ch_tcp_port : 9004 },
+    { name = "clickhouse-06", shard = 2, replica = 3, host = "clickhouse-06", http_port = var.use_standard_ports ? var.ch_http_port : 8128, tcp_port = var.use_standard_ports ? var.ch_tcp_port : 9005 },
+  ]
+
+  # Итоговый список нод в зависимости от переменной `deploy_new_replicas`
+  clickhouse_nodes = var.deploy_new_replicas ? concat(local.base_clickhouse_nodes, local.new_clickhouse_nodes) : local.base_clickhouse_nodes
+
+  # Для генерации remote_servers в config.xml.tpl — динамическая карта шардов с их репликами.
+  # Это гарантирует, что при добавлении новых нод конфиги на старых нодах обновятся.
   remote_servers = [
-    {
-      shard = 1
+    for shard_num in distinct([for n in local.clickhouse_nodes : n.shard]) : {
+      shard = shard_num
       replicas = [
-        { host = "clickhouse-01", port = 9000 },
-        { host = "clickhouse-03", port = 9002 },
-        # { host = "clickhouse-05", port = 9004 },
+        for n in local.clickhouse_nodes : {
+          host = n.host
+          port = var.use_standard_ports ? var.ch_tcp_port : n.tcp_port
+        } if n.shard == shard_num
       ]
-    },
-    {
-      shard = 2
-      replicas = [
-        { host = "clickhouse-02", port = 9001 },
-        { host = "clickhouse-04", port = 9003 },
-        # { host = "clickhouse-06", port = 9005 },
-      ]
-    },
+    }
   ]
+
+  # Готовим контент для всех конфигов заранее, чтобы избежать дублирования
+  # и использовать его и для хеша в лейбле, и для записи на диск.
+  clickhouse_configs = {
+    for n in local.clickhouse_nodes : n.name => templatefile("${path.module}/samples/config.xml.tpl", {
+      node                 = n
+      remote_servers       = local.remote_servers
+      keepers              = local.keeper_nodes
+      cluster_name         = local.cluster_name
+      super_user_name      = local.super_user_name
+      super_user_password  = var.super_user_password
+      ch_http_port         = var.use_standard_ports ? var.ch_http_port : n.http_port
+      ch_tcp_port          = var.use_standard_ports ? var.ch_tcp_port : n.tcp_port
+      ch_replication_port  = var.ch_replication_port
+      macros = {
+        shard   = n.shard
+        replica = n.replica
+      }
+    })
+  }
 }
 
 # Общая сеть для корректного сообщения контейнеров
@@ -107,18 +127,25 @@ resource "local_file" "users_xml" {
   ]
 }
 
-# 4. Генерируем config.xml для каждой ClickHouse-ноды (динамика remote_servers, zookeeper, макросы, порты)
-resource "local_file" "config_xml" {
-  for_each = { for n in local.clickhouse_nodes : n.name => n }
-  content = templatefile("${path.module}/samples/config.xml.tpl", {
-    node                = each.value
-    remote_servers      = local.remote_servers
-    keepers             = local.keeper_nodes
-    cluster_name        = local.cluster_name
-    super_user_name     = local.super_user_name
-    super_user_password = var.super_user_password
-  })
-  filename = "${var.clickhouse_base_path}/${each.key}/etc/clickhouse-server/config.d/config.xml"
+# 4. Генерируем config.xml для каждой ClickHouse-ноды с помощью null_resource и local-exec.
+# Это решает проблему с race condition при замене контейнеров, так как файл
+# не удаляется, а перезаписывается, что является атомарной операцией для Docker.
+resource "null_resource" "write_config_xml" {
+  for_each = local.clickhouse_configs
+
+  triggers = {
+    # Триггер для перезапуска provisioner'а при изменении контента конфига
+    content_sha256 = sha256(each.value)
+  }
+
+  provisioner "local-exec" {
+    command = <<EOT
+cat > "${var.clickhouse_base_path}/${each.key}/etc/clickhouse-server/config.d/config.xml" <<EOF
+${each.value}
+EOF
+EOT
+  }
+
   depends_on = [
     null_resource.mk_clickhouse_dirs
   ]
@@ -199,6 +226,13 @@ resource "docker_container" "ch_nodes" {
   # optimization part
   memory = var.memory_limit
 
+  # Добавляем label с хешем конфига, чтобы контейнер пересоздавался при его изменении.
+  # Хеш берем из заранее подготовленной карты `local.clickhouse_configs`.
+  labels {
+    label = "config_hash"
+    value = sha256(local.clickhouse_configs[each.key])
+  }
+
   user = "${var.ch_uid}:${var.ch_gid}"
   networks_advanced {
     name    = docker_network.ch_net.name
@@ -208,15 +242,16 @@ resource "docker_container" "ch_nodes" {
   dynamic "ports" {
     for_each = each.key == "clickhouse-01" ? [1] : []
     content {
-      internal = 8123
-      external = 8123
+      internal = var.use_standard_ports ? var.ch_http_port : each.value.http_port
+      external = var.use_standard_ports ? var.ch_http_port : each.value.http_port
     }
   }
+
   dynamic "ports" {
     for_each = each.key == "clickhouse-01" ? [1] : []
     content {
-      internal = 9000
-      external = 9000
+      internal = var.use_standard_ports ? var.ch_tcp_port : each.value.tcp_port
+      external = var.use_standard_ports ? var.ch_tcp_port : each.value.tcp_port
     }
   }
 
@@ -252,8 +287,7 @@ resource "docker_container" "ch_nodes" {
 
   depends_on = [
     docker_container.keeper,
-    null_resource.mk_clickhouse_dirs,
-    local_file.config_xml,
+    null_resource.write_config_xml,
     local_file.users_xml
   ]
 }

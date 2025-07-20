@@ -57,3 +57,35 @@ variable "ch_gid" {
   type        = string
   default     = "101"
 }
+
+# Переменная для управления развертыванием новых реплик
+variable "deploy_new_replicas" {
+  description = "Если true, разворачивает дополнительные реплики ClickHouse (ноды 05 и 06)."
+  type        = bool
+  default     = false
+}
+
+# Переменные для управления портами
+variable "use_standard_ports" {
+  description = "Использовать стандартные порты для всех нод ClickHouse."
+  type        = bool
+  default     = true
+}
+
+variable "ch_http_port" {
+  description = "Стандартный HTTP порт для ClickHouse."
+  type        = number
+  default     = 8123
+}
+
+variable "ch_tcp_port" {
+  description = "Стандартный TCP порт для ClickHouse."
+  type        = number
+  default     = 9000
+}
+
+variable "ch_replication_port" {
+  description = "Стандартный порт репликации для ClickHouse."
+  type        = number
+  default     = 9001
+}

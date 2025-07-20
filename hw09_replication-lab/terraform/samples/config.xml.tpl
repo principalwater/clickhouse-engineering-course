@@ -8,8 +8,9 @@
     </logger>
     <display_name>${cluster_name} node ${node.shard} replica ${node.replica}</display_name>
     <listen_host>0.0.0.0</listen_host>
-    <http_port>${node.http_port}</http_port>
-    <tcp_port>${node.tcp_port}</tcp_port>
+    <http_port>${ch_http_port}</http_port>
+    <tcp_port>${ch_tcp_port}</tcp_port>
+    <tcp_port_replication>${ch_replication_port}</tcp_port_replication>
 
     <!-- optimization part start -->
     <!-- Ограничения скорости репликации для стресс-тестов и прод-стенда -->
