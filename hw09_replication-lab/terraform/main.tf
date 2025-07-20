@@ -67,15 +67,15 @@ locals {
   # и использовать его и для хеша в лейбле, и для записи на диск.
   clickhouse_configs = {
     for n in local.clickhouse_nodes : n.name => templatefile("${path.module}/samples/config.xml.tpl", {
-      node                 = n
-      remote_servers       = local.remote_servers
-      keepers              = local.keeper_nodes
-      cluster_name         = local.cluster_name
-      super_user_name      = local.super_user_name
-      super_user_password  = var.super_user_password
-      ch_http_port         = var.use_standard_ports ? var.ch_http_port : n.http_port
-      ch_tcp_port          = var.use_standard_ports ? var.ch_tcp_port : n.tcp_port
-      ch_replication_port  = var.ch_replication_port
+      node                = n
+      remote_servers      = local.remote_servers
+      keepers             = local.keeper_nodes
+      cluster_name        = local.cluster_name
+      super_user_name     = local.super_user_name
+      super_user_password = var.super_user_password
+      ch_http_port        = var.use_standard_ports ? var.ch_http_port : n.http_port
+      ch_tcp_port         = var.use_standard_ports ? var.ch_tcp_port : n.tcp_port
+      ch_replication_port = var.ch_replication_port
       macros = {
         shard   = n.shard
         replica = n.replica
