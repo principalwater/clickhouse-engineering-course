@@ -1,0 +1,30 @@
+name: PR Auto-Approve via App
+
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  auto-approve-via-app:
+    runs-on: ubuntu-latest
+    if: |
+      github.event.issue.pull_request &&
+      github.event.comment.body == '/approve' &&
+      github.actor == 'principalwater'
+    steps:
+      # Шаг 1: Генерируем временный токен для GitHub App.
+      # Это более безопасный подход, чем использование долгоживущих токенов.
+      - name: Generate GitHub App Token
+        id: generate-token
+        uses: tibdex/github-app-token@v2
+        with:
+          app_id: ${{ secrets.APP_ID }}
+          private_key: ${{ secrets.APP_PRIVATE_KEY }}
+
+      # Шаг 2: Используем сгенерированный токен для одобрения PR.
+      - name: Approve Pull Request
+        uses: juliangruber/approve-pull-request-action@v1
+        with:
+          github-token: ${{ steps.generate-token.outputs.token }}
+          number: ${{ github.event.issue.number }}
+
