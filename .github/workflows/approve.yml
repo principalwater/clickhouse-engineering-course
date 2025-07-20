@@ -1,0 +1,26 @@
+name: PR Auto-Approve
+
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  auto-approve:
+    runs-on: ubuntu-latest
+    # Это условие гарантирует, что action сработает только если:
+    # 1. Комментарий оставлен в Pull Request.
+    # 2. Текст комментария в точности "/approve".
+    # 3. Автор комментария - создатель репозитория (principalwater).
+    if: |
+      github.event.issue.pull_request &&
+      github.event.comment.body == '/approve' &&
+      github.actor == 'principalwater'
+    steps:
+      - name: Auto-approve PR
+        uses: hmarr/auto-approve-action@v3
+        with:
+          # GITHUB_TOKEN предоставляется GitHub автоматически.
+          # Ему нужно выдать права на одобрение PR.
+          github-token: "${{ secrets.GITHUB_TOKEN }}"
+          # Номер PR берётся из контекста события.
+          pull-request-number: ${{ github.event.issue.number }}
