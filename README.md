@@ -29,6 +29,7 @@
 6) [Джойны и агрегации](./hw06_joins-and-aggregations)
 7) [Работа со словарями и оконными функциями в ClickHouse](./hw07_dictionaries-windows)
 8) [Проекции и материализованные представления](./hw08_projections-materialized-views)
+9) [Репликация и фоновые процессы в ClickHouse](./hw09_replication-lab)
 
 **Дополнительно:**
 - [Инфраструктурные модули и сценарии автоматизации (Terraform, Docker, ClickHouse)](./base-infra)
@@ -95,6 +96,7 @@ This repository is equipped with a production-ready CI/CD pipeline powered by Gi
 6) [Joins and Aggregations](./hw06_joins-and-aggregations)
 7) [Dictionaries and Window Functions in ClickHouse](./hw07_dictionaries-windows)
 8) [Projections and Materialized Views](./hw08_projections-materialized-views)
+9) [Replication and Background Processes in ClickHouse](./hw09_replication-lab)
 
 **Additionally:**
 - [Infrastructure modules and automation scripts (Terraform, Docker, ClickHouse)](./base-infra)
