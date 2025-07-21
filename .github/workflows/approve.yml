@@ -26,4 +26,3 @@ jobs:
           github-token: ${{ secrets.ELEMENTARY_FLOW_BOT_PAT }}
           # Номер PR берём из контекста события комментария
           pull-request-number: ${{ github.event.issue.number }}
-
