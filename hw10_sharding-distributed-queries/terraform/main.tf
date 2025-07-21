@@ -52,7 +52,7 @@ locals {
     "2s_2r" = local.clickhouse_nodes_2s_2r
     "4s_1r" = local.clickhouse_nodes_4s_1r
   }
-  
+
   clickhouse_nodes = local.clickhouse_nodes_map[var.cluster_topology]
 
   # Для генерации remote_servers в config.xml.tpl — динамическая карта шардов с их репликами.
