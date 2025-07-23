@@ -47,7 +47,7 @@
 ## Часть 1. Основное задание
 
 ### Шаг 1.1. Подготовка окружения
-Для выполнения задания будет использоваться кластер ClickHouse, развернутый с помощью Terraform из каталога `base-infra`.
+Для выполнения задания будет использоваться кластер ClickHouse, развернутый с помощью Terraform из каталога [base-infra](../base-infra/).
 ```sh
 cd base-infra/clickhouse
 terraform apply -auto-approve
@@ -108,7 +108,7 @@ FROM numbers(100000000);
 
 *Результат проверки распределения данных:*
 
-<img src="../screenshots/hw11_mutations-partitions/02_02_check_distribution.png" alt="Проверка распределения данных" width="800"/>
+<img src="../screenshots/hw11_mutations-partitions/02_02_check_distribution.png" alt="Проверка распределения данных" width="600"/>
 
 ### Шаг 1.5. Выполнение мутации (UPDATE)
 ```sql
@@ -220,7 +220,7 @@ WHERE toYYYYMM(activity_date) = 202503 AND activity_type = 'purchase';
     ```
 *Результат проверки после `REPLACE PARTITION`:*
 
-<img src="../screenshots/hw11_mutations-partitions/07_check_replace.png" alt="Проверка после REPLACE" width="800"/>
+<img src="../screenshots/hw11_mutations-partitions/07_check_replace.png" alt="Проверка после REPLACE" width="600"/>
 
 ### Шаг 2.3. Управление жизненным циклом данных (TTL)
 ```sql
@@ -233,40 +233,68 @@ SHOW CREATE TABLE otus_default.user_activity_local;
 ```
 *Результат `SHOW CREATE TABLE` с TTL:*
 
-<img src="../screenshots/hw11_mutations-partitions/08_check_ttl.png" alt="Проверка TTL в схеме таблицы" width="800"/>
+<img src="../screenshots/hw11_mutations-partitions/08_check_ttl.png" alt="Проверка TTL в схеме таблицы" width="600"/>
 
 ### Шаг 2.4. Трансформация данных через Materialized View
-1. **Создание целевой таблицы и Materialized View:**
+`Materialized View` (MV) можно использовать как триггер для трансформации данных "на лету". Однако в кластерной среде их настройка требует особого внимания, чтобы избежать дублирования данных.
+
+> **💡 Причина дублей:** Если `Materialized View` слушает локальную `Replicated`-таблицу, он срабатывает на **каждой** реплике, куда приходят данные, что приводит к многократному выполнению одной и той же трансформации.
+
+**Правильное решение:** `Materialized View` должен слушать `Distributed`-таблицу. В этом случае `INSERT` в `Distributed`-таблицу будет виден как единое событие, и MV сработает только один раз.
+
+1. **Создание инфраструктуры для трансформации:**
    ```sql
-   CREATE TABLE otus_default.user_activity_transformed_local ON CLUSTER dwh_test
+   -- 1. Локальная таблица-приемник для трансформированных данных
+   CREATE TABLE IF NOT EXISTS otus_default.user_activity_transformed_local ON CLUSTER dwh_test
    AS otus_default.user_activity_local
    ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/user_activity_transformed/{uuid}', '{replica}');
 
-   CREATE MATERIALIZED VIEW otus_default.mv_transform_activity ON CLUSTER dwh_test
+   -- 2. Materialized View: подписывается на распределенную таблицу-источник, пишет в локальную таблицу-приемник
+   CREATE MATERIALIZED VIEW IF NOT EXISTS otus_default.mv_transform_activity ON CLUSTER dwh_test
    TO otus_default.user_activity_transformed_local
    AS SELECT
        user_id,
        if(activity_type = 'purchase', 'view_page', activity_type) AS activity_type,
        activity_date
-   FROM otus_default.user_activity_local;
+   FROM otus_default.user_activity;
    ```
+
 2. **Вставка данных для триггера:**
    ```sql
    INSERT INTO otus_default.user_activity (user_id, activity_type, activity_date)
    VALUES (999, 'purchase', '2025-06-01 12:00:00');
    ```
+
 3. **Проверка результата:**
+   Сначала проверим локальную таблицу на одном из узлов. Мы должны увидеть одну трансформированную запись.
    ```sql
    SELECT * FROM otus_default.user_activity_transformed_local WHERE user_id = 999;
    ```
-*Результат проверки работы Materialized View:*
+   *Результат проверки `_local` таблицы:*
 
-<img src="../screenshots/hw11_mutations-partitions/09_check_mv.png" alt="Проверка данных после MV" width="800"/>
+   <img src="../screenshots/hw11_mutations-partitions/09_01_check_mv_local.png" alt="Проверка локальной таблицы после MV" width="600"/>
 
-4. **Очистка:**
+   > **💡 Примечание:** В продуктивной среде для запросов всегда следует использовать `Distributed`-таблицу. Создадим ее и убедимся, что и на уровне всего кластера мы видим одну запись.
+
+4. **Создание `Distributed`-таблицы для проверки и очистка:**
    ```sql
-   DROP VIEW otus_default.mv_transform_activity ON CLUSTER dwh_test;
-   DROP TABLE otus_default.user_activity_transformed_local ON CLUSTER dwh_test;
+   -- Создаем Distributed-таблицу поверх трансформированных данных
+   CREATE TABLE IF NOT EXISTS otus_default.user_activity_transformed ON CLUSTER dwh_test
+   AS otus_default.user_activity_transformed_local
+   ENGINE = Distributed('dwh_test', 'otus_default', 'user_activity_transformed_local', cityHash64(user_id));
+
+   -- Проверяем данные через нее
+   SELECT * FROM otus_default.user_activity_transformed WHERE user_id = 999;
+   ```
+   *Результат проверки `Distributed`-таблицы:*
+
+   <img src="../screenshots/hw11_mutations-partitions/09_02_check_mv_dist.png" alt="Проверка распределенной таблицы после MV" width="600"/>
+
+   ```sql
+   -- Финальная очистка
+   DROP VIEW IF EXISTS otus_default.mv_transform_activity ON CLUSTER dwh_test;
+   DROP TABLE IF EXISTS otus_default.user_activity_transformed ON CLUSTER dwh_test;
+   DROP TABLE IF EXISTS otus_default.user_activity_transformed_local ON CLUSTER dwh_test;
    ```
 
 ---
@@ -277,5 +305,5 @@ SHOW CREATE TABLE otus_default.user_activity_local;
 ## Список источников
 - [Официальная документация ClickHouse: ALTER TABLE](https://clickhouse.com/docs/ru/sql-reference/statements/alter)
 - [Официальная документация ClickHouse: Materialized View](https://clickhouse.com/docs/ru/sql-reference/statements/create/view/#materialized-view)
-- [Статья на Habr: TTL в ClickHouse](https://habr.com/ru/companies/just_ai/articles/589621/)
-- [Статья: Что такое мутации в ClickHouse?](https://ivan-shamaev.ru/clickhouse-101-course-on-learn-clickhouse-com/#__ClickHouse-2)
+- [Статья на Habr: Обновление данных в ClickHouse](https://habr.com/ru/companies/just_ai/articles/589621/)
+- [Статья в блоге ivan-shamaev.ru: Что такое мутации в ClickHouse?](https://ivan-shamaev.ru/clickhouse-101-course-on-learn-clickhouse-com/#__ClickHouse-2)
