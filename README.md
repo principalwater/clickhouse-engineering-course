@@ -32,6 +32,7 @@
 9) [Репликация и фоновые процессы в ClickHouse](./hw09_replication-lab)
 10) [Шардирование и распределенные запросы](./hw10_sharding-distributed-queries)
 11) [Мутация данных и манипуляции с партициями](./hw11_mutations-partitions)
+12) [RBAC контроль доступа, квоты и ограничения](./hw12_rbac-quotas-limits)
 
 **Дополнительно:**
 - [Инфраструктурные модули и сценарии автоматизации (Terraform, Docker, ClickHouse)](./base-infra)
@@ -101,6 +102,7 @@ This repository is equipped with a production-ready CI/CD pipeline powered by Gi
 9) [Replication and Background Processes in ClickHouse](./hw09_replication-lab)
 10) [Sharding and Distributed Queries](./hw10_sharding-distributed-queries)
 11) [Data Mutation and Partition Manipulation](./hw11_mutations-partitions)
+12) [RBAC Access Control, Quotas and Limits](./hw12_rbac-quotas-limits)
 
 **Additionally:**
 - [Infrastructure modules and automation scripts (Terraform, Docker, ClickHouse)](./base-infra)
