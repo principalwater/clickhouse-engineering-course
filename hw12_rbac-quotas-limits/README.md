@@ -11,6 +11,7 @@
   - [1.3. Создание роли и выдача привилегий](#13-создание-роли-и-выдача-привилегий)
   - [1.4. Назначение роли пользователю](#14-назначение-роли-пользователю)
   - [1.5. Проверка созданных сущностей](#15-проверка-созданных-сущностей)
+  - [1.6. Формирование отчета](#16-формирование-отчета)
 - [Часть 2. Дополнительные манипуляции: управление ресурсами и автоматизация](#часть-2-дополнительные-манипуляции-управление-ресурсами-и-автоматизация)
   - [2.1. Создание иерархии профилей настроек](#21-создание-иерархии-профилей-настроек)
   - [2.2. Создание и применение квоты](#22-создание-и-применение-квоты)
@@ -111,6 +112,42 @@ GRANT devs TO jhon ON CLUSTER dwh_test;
 > - В `system.grants` атрибут `user_name` имеет значение `NULL`, так как привилегия `SELECT` была выдана непосредственно роли `devs`, а не конкретному пользователю.
 >
 > Это стандартное поведение, которое показывает, как ClickHouse разделяет сущности прав.
+
+### 1.6. Формирование отчета
+Для сдачи домашнего задания необходимо предоставить текстовый документ, содержащий все выполненные DDL-запросы и результаты проверок из системных таблиц.
+
+Следующая команда, выполненная из каталога `terraform`, сформирует отчет в удобном формате Markdown:
+```bash
+# Создаем директорию, если она не существует
+mkdir -p ../../materials/hw12_rbac-quotas-limits
+
+# Формируем отчет
+(
+    echo "## 1. Создание пользователя jhon"
+    echo '```sql'
+    echo "CREATE USER IF NOT EXISTS jhon ON CLUSTER dwh_test IDENTIFIED BY 'qwerty';"
+    echo '```'
+    echo -e "\n## 2. Создание роли devs и выдача прав"
+    echo '```sql'
+    echo "CREATE ROLE IF NOT EXISTS devs ON CLUSTER dwh_test;"
+    echo "GRANT SELECT ON system.parts TO devs ON CLUSTER dwh_test;"
+    echo '```'
+    echo -e "\n## 3. Назначение роли пользователю"
+    echo '```sql'
+    echo "GRANT devs TO jhon ON CLUSTER dwh_test;"
+    echo '```'
+    echo -e "\n## 4. Результаты проверок"
+    echo '### system.role_grants'
+    echo '```'
+    docker exec clickhouse-01 clickhouse-client --user ${TF_VAR_super_user_name} --password ${TF_VAR_super_user_password} --query "SELECT * FROM system.role_grants WHERE user_name = 'jhon';" --vertical
+    echo '```'
+    echo '### system.grants'
+    echo '```'
+    docker exec clickhouse-01 clickhouse-client --user ${TF_VAR_super_user_name} --password ${TF_VAR_super_user_password} --query "SELECT * FROM system.grants WHERE role_name = 'devs';" --vertical
+    echo '```'
+) > ../../materials/hw12_rbac-quotas-limits/result.md
+```
+> Результат сохранен в файле: [`result.md`](../materials/hw12_rbac-quotas-limits/result.md).
 
 ---
 
