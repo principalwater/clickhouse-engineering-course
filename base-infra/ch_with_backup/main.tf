@@ -78,6 +78,8 @@ locals {
     { shard = 1, replicas = [{ host = "clickhouse-01", port = var.use_standard_ports ? var.ch_tcp_port : 9000 }, { host = "clickhouse-03", port = var.use_standard_ports ? var.ch_tcp_port : 9002 }] },
     { shard = 2, replicas = [{ host = "clickhouse-02", port = var.use_standard_ports ? var.ch_tcp_port : 9001 }, { host = "clickhouse-04", port = var.use_standard_ports ? var.ch_tcp_port : 9003 }] },
   ]
+  backup_bucket_exists  = data.external.backup_exists.result.exists == "true"
+  storage_bucket_exists = var.storage_type == "s3_ssd" ? (one(data.external.storage_exists).result.exists == "true") : true
 }
 
 # --- Resources ---
@@ -117,27 +119,27 @@ resource "local_file" "users_xml" {
     bi_user_name               = local.bi_user_name
     bi_user_password_sha256    = local.bi_user_password_sha256
   })
-  filename = "${var.clickhouse_base_path}/${each.key}/etc/clickhouse-server/users.d/users.xml"
+  filename   = "${var.clickhouse_base_path}/${each.key}/etc/clickhouse-server/users.d/users.xml"
   depends_on = [null_resource.mk_clickhouse_dirs]
 }
 
 resource "local_file" "config_xml" {
   for_each = { for n in local.clickhouse_nodes : n.name => n }
   content = templatefile("${path.module}/samples/config.xml.tpl", {
-    node                  = each.value
-    remote_servers        = local.remote_servers
-    keepers               = local.keeper_nodes
-    cluster_name          = local.cluster_name
-    super_user_name       = local.super_user_name
-    super_user_password   = var.super_user_password
-    local_minio_port      = var.local_minio_port
-    minio_root_user       = var.minio_root_user
-    minio_root_password   = var.minio_root_password
-    storage_type          = var.storage_type
-    remote_host_name      = var.remote_host_name
-    ch_replication_port   = var.ch_replication_port
+    node                = each.value
+    remote_servers      = local.remote_servers
+    keepers             = local.keeper_nodes
+    cluster_name        = local.cluster_name
+    super_user_name     = local.super_user_name
+    super_user_password = var.super_user_password
+    local_minio_port    = var.local_minio_port
+    minio_root_user     = var.minio_root_user
+    minio_root_password = var.minio_root_password
+    storage_type        = var.storage_type
+    remote_host_name    = var.remote_host_name
+    ch_replication_port = var.ch_replication_port
   })
-  filename = "${var.clickhouse_base_path}/${each.key}/etc/clickhouse-server/config.d/config.xml"
+  filename   = "${var.clickhouse_base_path}/${each.key}/etc/clickhouse-server/config.d/config.xml"
   depends_on = [null_resource.mk_clickhouse_dirs]
 }
 
@@ -160,7 +162,7 @@ resource "local_file" "keeper_config" {
     keeper      = each.value
     keepers_all = local.keeper_nodes
   })
-  filename = "${var.clickhouse_base_path}/${each.key}/etc/clickhouse-keeper/keeper_config.xml"
+  filename   = "${var.clickhouse_base_path}/${each.key}/etc/clickhouse-keeper/keeper_config.xml"
   depends_on = [null_resource.mk_keeper_dirs]
 }
 
@@ -182,14 +184,14 @@ resource "docker_container" "keeper" {
     read_only = true
   }
   mounts {
-    target    = "/var/lib/clickhouse/coordination"
-    source    = abspath("${var.clickhouse_base_path}/${each.key}/data/coordination")
-    type      = "bind"
+    target = "/var/lib/clickhouse/coordination"
+    source = abspath("${var.clickhouse_base_path}/${each.key}/data/coordination")
+    type   = "bind"
   }
   mounts {
-    target    = "/var/log/clickhouse-keeper"
-    source    = abspath("${var.clickhouse_base_path}/${each.key}/logs")
-    type      = "bind"
+    target = "/var/log/clickhouse-keeper"
+    source = abspath("${var.clickhouse_base_path}/${each.key}/logs")
+    type   = "bind"
   }
   depends_on = [null_resource.mk_keeper_dirs, local_file.keeper_config]
 }
@@ -233,16 +235,16 @@ resource "docker_container" "ch_nodes" {
     read_only = true
   }
   mounts {
-    target    = "/var/lib/clickhouse"
-    source    = abspath("${var.clickhouse_base_path}/${each.key}/data")
-    type      = "bind"
+    target = "/var/lib/clickhouse"
+    source = abspath("${var.clickhouse_base_path}/${each.key}/data")
+    type   = "bind"
   }
   mounts {
-    target    = "/var/log/clickhouse-server"
-    source    = abspath("${var.clickhouse_base_path}/${each.key}/logs")
-    type      = "bind"
+    target = "/var/log/clickhouse-server"
+    source = abspath("${var.clickhouse_base_path}/${each.key}/logs")
+    type   = "bind"
   }
-  depends_on = [docker_container.keeper, local_file.config_xml, local_file.users_xml, aws_s3_bucket_policy.minio_storage_bucket_policy]
+  depends_on = [docker_container.keeper, local_file.config_xml, local_file.users_xml, aws_s3_bucket.minio_storage_bucket]
 }
 
 # --- MinIO (S3) ---
@@ -276,8 +278,8 @@ resource "docker_container" "minio_local" {
     target = "/data"
     type   = "bind"
   }
-  env     = ["MINIO_ROOT_USER=${var.minio_root_user}", "MINIO_ROOT_PASSWORD=${var.minio_root_password}", "CONSOLE_AGPL_LICENSE_ACCEPTED=yes"]
-  command = ["server", "/data", "--console-address", ":9001"]
+  env        = ["MINIO_ROOT_USER=${var.minio_root_user}", "MINIO_ROOT_PASSWORD=${var.minio_root_password}", "CONSOLE_AGPL_LICENSE_ACCEPTED=yes"]
+  command    = ["server", "/data", "--console-address", ":9001"]
   depends_on = [null_resource.mk_local_minio_dir]
 }
 
@@ -343,68 +345,96 @@ resource "null_resource" "wait_for_local_minio" {
 }
 
 # --- S3 Buckets ---
+data "external" "backup_exists" {
+  program = [
+    "python3",
+    "${path.module}/../scripts/minio_bucket_check.py",
+    var.bucket_backup,
+    var.remote_host_name,
+    var.remote_minio_port,
+    var.minio_root_user,
+    var.minio_root_password,
+  ]
+}
+
+data "external" "storage_exists" {
+  count = var.storage_type == "s3_ssd" ? 1 : 0
+  program = [
+    "python3",
+    "${path.module}/../scripts/minio_bucket_check.py",
+    var.bucket_storage,
+    "localhost",
+    var.local_minio_port,
+    var.minio_root_user,
+    var.minio_root_password,
+  ]
+}
+
 resource "aws_s3_bucket" "minio_backup_bucket" {
+  count    = !local.backup_bucket_exists ? 1 : 0
   provider = aws.remote_backup
-  bucket   = "clickhouse-backups"
+  bucket   = var.bucket_backup
+
+  lifecycle {
+    prevent_destroy = true
+  }
   depends_on = [null_resource.wait_for_remote_minio]
 }
 
 resource "aws_s3_bucket_policy" "minio_backup_bucket_policy" {
+  count    = !local.backup_bucket_exists ? 1 : 0
   provider = aws.remote_backup
-  bucket   = aws_s3_bucket.minio_backup_bucket.id
+  bucket   = aws_s3_bucket.minio_backup_bucket[0].id
+
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
-        Action = [
-          "s3:GetObject",
-        ]
+        Action    = ["s3:GetObject"]
         Effect    = "Allow"
         Principal = "*"
-        Resource = [
-          "${aws_s3_bucket.minio_backup_bucket.arn}/*",
-        ]
+        Resource  = ["${aws_s3_bucket.minio_backup_bucket[0].arn}/*"]
       },
     ]
   })
 }
 
 resource "aws_s3_bucket" "minio_storage_bucket" {
-  count    = var.storage_type == "s3_ssd" ? 1 : 0
+  count    = var.storage_type == "s3_ssd" && !local.storage_bucket_exists ? 1 : 0
   provider = aws.local_storage
-  bucket   = "clickhouse-storage-bucket"
+  bucket   = var.bucket_storage
+
+  lifecycle {
+    prevent_destroy = true
+  }
   depends_on = [null_resource.wait_for_local_minio]
 }
 
 resource "aws_s3_bucket_policy" "minio_storage_bucket_policy" {
-  count    = var.storage_type == "s3_ssd" ? 1 : 0
+  count    = var.storage_type == "s3_ssd" && !local.storage_bucket_exists ? 1 : 0
   provider = aws.local_storage
   bucket   = aws_s3_bucket.minio_storage_bucket[0].id
+
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
-        Action = [
-          "s3:GetObject",
-          "s3:PutObject",
-          "s3:DeleteObject",
-          "s3:ListBucket"
-        ]
+        Action    = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:ListBucket"]
         Effect    = "Allow"
         Principal = "*"
         Resource = [
           "${aws_s3_bucket.minio_storage_bucket[0].arn}/*",
           aws_s3_bucket.minio_storage_bucket[0].arn
         ]
-      },
+      }
     ]
   })
 }
 
 # --- ClickHouse Backup ---
 resource "docker_container" "clickhouse_backup" {
-  name  = "clickhouse-backup"
-  image = docker_image.clickhouse_backup.name
+  name    = "clickhouse-backup"
+  image   = docker_image.clickhouse_backup.name
   command = ["server"] # Run API server to keep container alive
   networks_advanced {
     name = docker_network.ch_net.name
@@ -446,7 +476,7 @@ resource "null_resource" "mk_env_dir" {
 }
 
 resource "local_file" "env_file" {
-  content = <<EOT
+  content    = <<EOT
 CH_USER=${local.super_user_name}
 CH_PASSWORD=${var.super_user_password}
 BI_USER=${local.bi_user_name}
@@ -454,6 +484,6 @@ BI_PASSWORD=${var.bi_user_password}
 MINIO_USER=${var.minio_root_user}
 MINIO_PASSWORD=${var.minio_root_password}
 EOT
-  filename = "${path.root}/../env/clickhouse.env"
+  filename   = "${path.root}/../env/clickhouse.env"
   depends_on = [null_resource.mk_env_dir]
 }

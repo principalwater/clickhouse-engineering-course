@@ -22,6 +22,23 @@
 ## Архитектура решения и аппаратное обеспечение
 Для выполнения задания используется гибридная, полностью автоматизированная архитектура, описанная в модуле [`base-infra/ch_with_backup`](../base-infra/ch_with_backup/README.md).
 
+### Проверка существования бакетов
+Для предотвращения ошибок при повторном применении Terraform, используется Python-скрипт (`base-infra/scripts/minio_bucket_check.py`), который проверяет наличие бакетов в MinIO перед их созданием.
+
+**Установка зависимостей для скрипта**
+
+Перед использованием скрипта необходимо убедиться, что в используемом окружении Python установлена библиотека `minio`. Для этого в директории `base-infra/scripts` создан файл `requirements.txt`.
+Установить зависимости можно командой:
+```bash
+pip install -r base-infra/scripts/requirements.txt
+```
+
+В случае, если бакеты уже существуют и управляются не через Terraform, их можно однократно импортировать в состояние Terraform, чтобы избежать попыток их пересоздания:
+```bash
+terraform import aws_s3_bucket.minio_backup_bucket <имя_бакета_бэкапов>
+terraform import aws_s3_bucket.minio_storage_bucket <имя_бакета_хранилища>
+```
+
 ### Аппаратное обеспечение
 -   **Хост-машина (`mac-studio-foxes-home.local`):** Mac Studio (M2 Max, 32 ГБ RAM)
 -   **Внешний накопитель (локальный S3):** Samsung Portable SSD T7 2 ТБ (Thunderbolt 4)

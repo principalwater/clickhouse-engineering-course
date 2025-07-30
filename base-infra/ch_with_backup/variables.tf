@@ -150,3 +150,15 @@ variable "remote_host_name" {
   type        = string
   default     = "water-rpi.local"
 }
+
+variable "bucket_backup" {
+  description = "Имя бакета для бэкапов"
+  type        = string
+  default     = "clickhouse-backups"
+}
+
+variable "bucket_storage" {
+  description = "Имя бакета для S3 хранилища"
+  type        = string
+  default     = "clickhouse-storage-bucket"
+}
