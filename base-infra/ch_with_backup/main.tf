@@ -345,10 +345,11 @@ resource "null_resource" "wait_for_local_minio" {
 # --- S3 Buckets ---
 resource "null_resource" "minio_buckets" {
   provisioner "local-exec" {
-    command = "python3 ${path.module}/../scripts/minio_bucket_create.py ${var.bucket_backup} ${var.remote_host_name} ${var.remote_minio_port} ${var.minio_root_user} ${var.minio_root_password}"
+    command = "mc alias set remote_backup http://${var.remote_host_name}:${var.remote_minio_port} ${var.minio_root_user} ${var.minio_root_password} --api S3v4 && mc mb --ignore-existing remote_backup/${var.bucket_backup}"
   }
+
   provisioner "local-exec" {
-    command = var.storage_type == "s3_ssd" ? "python3 ${path.module}/../scripts/minio_bucket_create.py ${var.bucket_storage} localhost ${var.local_minio_port} ${var.minio_root_user} ${var.minio_root_password}" : "echo 'Skipping local bucket creation'"
+    command = var.storage_type == "s3_ssd" ? "mc alias set local_storage http://localhost:${var.local_minio_port} ${var.minio_root_user} ${var.minio_root_password} --api S3v4 && mc mb --ignore-existing local_storage/${var.bucket_storage}" : "echo 'Skipping local bucket creation'"
   }
 
   depends_on = [
