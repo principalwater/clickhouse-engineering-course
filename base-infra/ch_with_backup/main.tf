@@ -78,8 +78,6 @@ locals {
     { shard = 1, replicas = [{ host = "clickhouse-01", port = var.use_standard_ports ? var.ch_tcp_port : 9000 }, { host = "clickhouse-03", port = var.use_standard_ports ? var.ch_tcp_port : 9002 }] },
     { shard = 2, replicas = [{ host = "clickhouse-02", port = var.use_standard_ports ? var.ch_tcp_port : 9001 }, { host = "clickhouse-04", port = var.use_standard_ports ? var.ch_tcp_port : 9003 }] },
   ]
-  backup_bucket_exists  = data.external.backup_exists.result.exists == "true"
-  storage_bucket_exists = var.storage_type == "s3_ssd" ? (one(data.external.storage_exists).result.exists == "true") : true
 }
 
 # --- Resources ---
@@ -244,7 +242,7 @@ resource "docker_container" "ch_nodes" {
     source = abspath("${var.clickhouse_base_path}/${each.key}/logs")
     type   = "bind"
   }
-  depends_on = [docker_container.keeper, local_file.config_xml, local_file.users_xml, aws_s3_bucket.minio_storage_bucket]
+  depends_on = [docker_container.keeper, local_file.config_xml, local_file.users_xml, null_resource.minio_buckets]
 }
 
 # --- MinIO (S3) ---
@@ -345,90 +343,18 @@ resource "null_resource" "wait_for_local_minio" {
 }
 
 # --- S3 Buckets ---
-data "external" "backup_exists" {
-  program = [
-    "python3",
-    "${path.module}/../scripts/minio_bucket_check.py",
-    var.bucket_backup,
-    var.remote_host_name,
-    var.remote_minio_port,
-    var.minio_root_user,
-    var.minio_root_password,
-  ]
-}
-
-data "external" "storage_exists" {
-  count = var.storage_type == "s3_ssd" ? 1 : 0
-  program = [
-    "python3",
-    "${path.module}/../scripts/minio_bucket_check.py",
-    var.bucket_storage,
-    "localhost",
-    var.local_minio_port,
-    var.minio_root_user,
-    var.minio_root_password,
-  ]
-}
-
-resource "aws_s3_bucket" "minio_backup_bucket" {
-  count    = !local.backup_bucket_exists ? 1 : 0
-  provider = aws.remote_backup
-  bucket   = var.bucket_backup
-
-  lifecycle {
-    prevent_destroy = true
+resource "null_resource" "minio_buckets" {
+  provisioner "local-exec" {
+    command = "python3 ${path.module}/../scripts/minio_bucket_create.py ${var.bucket_backup} ${var.remote_host_name} ${var.remote_minio_port} ${var.minio_root_user} ${var.minio_root_password}"
   }
-  depends_on = [null_resource.wait_for_remote_minio]
-}
-
-resource "aws_s3_bucket_policy" "minio_backup_bucket_policy" {
-  count    = !local.backup_bucket_exists ? 1 : 0
-  provider = aws.remote_backup
-  bucket   = aws_s3_bucket.minio_backup_bucket[0].id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action    = ["s3:GetObject"]
-        Effect    = "Allow"
-        Principal = "*"
-        Resource  = ["${aws_s3_bucket.minio_backup_bucket[0].arn}/*"]
-      },
-    ]
-  })
-}
-
-resource "aws_s3_bucket" "minio_storage_bucket" {
-  count    = var.storage_type == "s3_ssd" && !local.storage_bucket_exists ? 1 : 0
-  provider = aws.local_storage
-  bucket   = var.bucket_storage
-
-  lifecycle {
-    prevent_destroy = true
+  provisioner "local-exec" {
+    command = var.storage_type == "s3_ssd" ? "python3 ${path.module}/../scripts/minio_bucket_create.py ${var.bucket_storage} localhost ${var.local_minio_port} ${var.minio_root_user} ${var.minio_root_password}" : "echo 'Skipping local bucket creation'"
   }
-  depends_on = [null_resource.wait_for_local_minio]
-}
 
-resource "aws_s3_bucket_policy" "minio_storage_bucket_policy" {
-  count    = var.storage_type == "s3_ssd" && !local.storage_bucket_exists ? 1 : 0
-  provider = aws.local_storage
-  bucket   = aws_s3_bucket.minio_storage_bucket[0].id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action    = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:ListBucket"]
-        Effect    = "Allow"
-        Principal = "*"
-        Resource = [
-          "${aws_s3_bucket.minio_storage_bucket[0].arn}/*",
-          aws_s3_bucket.minio_storage_bucket[0].arn
-        ]
-      }
-    ]
-  })
+  depends_on = [
+    null_resource.wait_for_remote_minio,
+    null_resource.wait_for_local_minio
+  ]
 }
 
 # --- ClickHouse Backup ---
@@ -465,7 +391,7 @@ resource "docker_container" "clickhouse_backup" {
     "S3_DISABLE_SSL=true",
     "S3_FORCE_PATH_STYLE=true"
   ]
-  depends_on = [docker_container.ch_nodes, aws_s3_bucket_policy.minio_backup_bucket_policy]
+  depends_on = [docker_container.ch_nodes, null_resource.minio_buckets]
 }
 
 # .env file
