@@ -38,27 +38,58 @@
 
 ## Пошаговая инструкция по развертыванию
 
-1.  **Настройте SSH-доступ:** Убедитесь, что у вас настроен беспарольный SSH-доступ по ключу к удаленному хосту, имя которого задается переменной `remote_host_name`.
-2.  **Задайте переменные окружения:**
-    ```sh
-    export TF_VAR_super_user_name="your_ch_user"
-    export TF_VAR_super_user_password="your_ch_password"
-    export TF_VAR_bi_user_password="your_bi_password"
-    export TF_VAR_minio_root_user="your_minio_user"
-    export TF_VAR_minio_root_password="your_strong_password"
-    export TF_VAR_remote_ssh_user="your_ssh_user"
-    export TF_VAR_ssh_private_key_path="~/.ssh/your_private_key"
-    export TF_VAR_remote_host_name="water-rpi.local"
+### 1. Предварительная настройка
+
+
+1.  **Задайте переменные:**
+    Рекомендуемый способ — создать в этом каталоге файл `terraform.tfvars` и указать в нем все необходимые значения.
+    
+    **Пример файла `terraform.tfvars`:**
+    ```hcl
+    super_user_name         = "su"
+    super_user_password     = "your_ch_password"
+    bi_user_password        = "your_bi_password"
+    
+    minio_root_user         = "your_minio_user"
+    minio_root_password     = "your_strong_password"
+    
+    remote_ssh_user         = "principalwater"
+    ssh_private_key_path    = "~/.ssh/water-rpi"
+    remote_host_name        = "water-rpi.local"
+    
+    local_minio_path        = "/Volumes/Samsung_T7/minio/data"
     ```
-3.  **Перейдите в каталог модуля:**
+    > **Важно:** Не забудьте добавить `*.tfvars` в ваш `.gitignore`, чтобы случайно не загрузить секреты в репозиторий.
+    
+    Альтернативно, можно использовать переменные окружения (`export TF_VAR_...`).
+
+2.  **Настройте и проверьте SSH-доступ к Docker:**
+    Для того чтобы Terraform мог управлять Docker на удаленном хосте, необходимо обеспечить бесшовное SSH-подключение.
+    
+    *   **Настройка SSH-клиента (рекомендуется):** Добавьте в ваш файл `~/.ssh/config` запись для удаленного хоста. Это позволит не указывать ключ каждый раз. Вместо переменных необходимо подставить их фактические значения:
+        ```
+        Host TF_VAR_remote_host_name
+          HostName TF_VAR_remote_host_name
+          User TF_VAR_remote_ssh_user
+          IdentityFile TF_VAR_ssh_private_key_path
+        ```
+    *   **Проверка:** После настройки `~/.ssh/config` (или добавления ключа в `ssh-agent`), выполните команду на вашей локальной машине. Она должна выполниться без ошибок и показать список (возможно, пустой) контейнеров на удаленном хосте.
+        ```sh
+        docker --host ssh://${TF_VAR_remote_host_name} ps
+        ```
+    Если команда не работает, убедитесь, что пользователь `${TF_VAR_remote_ssh_user}` на `${TF_VAR_remote_host_name}` состоит в группе `docker`.
+
+### 2. Развертывание
+
+1.  **Перейдите в каталог модуля:**
     ```sh
     cd base-infra/ch_with_backup
     ```
-4.  **Инициализируйте Terraform:**
+2.  **Инициализируйте Terraform:**
     ```sh
     terraform init
     ```
-5.  **Разверните инфраструктуру:**
+3.  **Разверните инфраструктуру, выбрав один из сценариев:**
     -   **Для Сценария 1 (локальное хранение):**
         ```sh
         terraform apply -auto-approve -var="storage_type=local_ssd"
@@ -68,4 +99,4 @@
         terraform apply -auto-approve -var="storage_type=s3_ssd"
         ```
 
-После выполнения этих шагов будет развернут кластер ClickHouse, два экземпляра MinIO (в зависимости от сценария) и контейнер `clickhouse-backup`, полностью готовые к работе.
+После выполнения этих шагов будет развернут кластер ClickHouse, один или два экземпляра MinIO (в зависимости от сценария) и контейнер `clickhouse-backup`, полностью готовые к работе.

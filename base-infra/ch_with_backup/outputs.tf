@@ -1,39 +1,34 @@
-###############################################################################
-# Outputs
-# Эти значения выводятся после terraform apply и помогают быстро убедиться,
-# что кластер запущен и где к нему подключаться.
-###############################################################################
+# --- Вывод информации о развернутой инфраструктуре ---
 
-# Список контейнеров ClickHouse (шарды × реплики)
-output "clickhouse_nodes" {
-  description = "Имена всех ClickHouse-контейнеров, сгенерированных Terraform."
-  value       = [for n in local.clickhouse_nodes : n.name]
+output "deployment_summary" {
+  description = "Сводная информация о развернутой конфигурации"
+  value = {
+    "storage_mode" = var.storage_type == "local_ssd" ? "Локальное хранилище на хосте" : "S3-хранилище на внешнем SSD"
+    "clickhouse_http_endpoint" = "http://localhost:${var.use_standard_ports ? var.ch_http_port : local.clickhouse_nodes[0].http_port}"
+    "clickhouse_tcp_endpoint"  = "tcp://localhost:${var.use_standard_ports ? var.ch_tcp_port : local.clickhouse_nodes[0].tcp_port}"
+    "local_minio_s3_endpoint"  = var.storage_type == "s3_ssd" ? "http://localhost:${var.local_minio_port}" : "Не используется"
+    "local_minio_console"      = var.storage_type == "s3_ssd" ? "http://localhost:${var.local_minio_port + 1}" : "Не используется"
+    "remote_backup_s3_endpoint" = "http://${var.remote_host_name}:${var.remote_minio_port}"
+    "remote_backup_console"     = "http://${var.remote_host_name}:${var.remote_minio_port + 1}"
+  }
 }
 
-# Список контейнеров ClickHouse Keeper
-output "keeper_nodes" {
-  description = "Имена всех Keeper-контейнеров."
-  value       = [for k in local.keeper_nodes : k.name]
+output "clickhouse_nodes_info" {
+  description = "Информация о нодах ClickHouse"
+  value = { for node in local.clickhouse_nodes : node.name => {
+    shard   = node.shard
+    replica = node.replica
+    host    = node.host
+    http_port = node.http_port
+    tcp_port  = node.tcp_port
+  }}
 }
 
-# Имя первой (условно «главной») ClickHouse-ноды — удобно для тестового подключения
-output "primary_clickhouse_node" {
-  description = "Первая ClickHouse-нода из списка (шард 1, реплика 1)."
-  value       = local.clickhouse_nodes[0].name
-}
-
-# Пример HTTP-эндпоинта для быстрой проверки (подставь свой порт, если менялся)
-# Обрати внимание: при использовании network_mode = \"host\" на одном хосте
-# несколько ClickHouse-процессов с одинаковым портом конфликтуют.
-# Для полноценного multi-node запуска на одной машине нужно задавать разные порты
-# или использовать bridge-сеть с порт-маппингом.
-output "sample_clickhouse_http_endpoint" {
-  description = "HTTP endpoint первой ноды (для clickhouse-client или браузера)."
-  value       = "${local.clickhouse_nodes[0].name}:8123"
-}
-
-# Формируем список host:port всех Keeper-нод (удобно вставить в zookeeper секцию при необходимости)
-output "keeper_endpoints" {
-  description = "Список 'host:port' всех Keeper-нод."
-  value       = [for k in local.keeper_nodes : "${k.host}:${k.tcp_port}"]
+output "keeper_nodes_info" {
+  description = "Информация о нодах ClickHouse Keeper"
+  value = { for node in local.keeper_nodes : node.name => {
+    id   = node.id
+    host = node.host
+    tcp_port = node.tcp_port
+  }}
 }

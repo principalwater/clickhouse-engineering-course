@@ -8,6 +8,10 @@ terraform {
       source  = "kreuzwerker/docker"
       version = "3.6.1"
     }
+    aws = {
+      source  = "hashicorp/aws"
+      version = "6.4.0"
+    }
   }
 }
 
@@ -15,10 +19,39 @@ terraform {
 provider "docker" {}
 
 provider "docker" {
-  alias    = "remote_host"
-  host     = "ssh://${var.remote_ssh_user}@${var.remote_host_name}"
-  ssh_opts = ["-i", var.ssh_private_key_path]
+  alias = "remote_host"
+  host  = "ssh://${var.remote_ssh_user}@${var.remote_host_name}"
+  # ssh_opts убран, чтобы Terraform использовал ssh-agent и ~/.ssh/config
 }
+
+provider "aws" {
+  alias      = "remote_backup"
+  access_key = var.minio_root_user
+  secret_key = var.minio_root_password
+  region     = "us-east-1" # minio requires a region
+  endpoints {
+    s3 = "http://${var.remote_host_name}:${var.remote_minio_port}"
+  }
+  s3_use_path_style           = true
+  skip_credentials_validation = true
+  skip_metadata_api_check     = true
+  skip_requesting_account_id  = true
+}
+
+provider "aws" {
+  alias      = "local_storage"
+  access_key = var.minio_root_user
+  secret_key = var.minio_root_password
+  region     = "us-east-1" # minio requires a region
+  endpoints {
+    s3 = "http://localhost:${var.local_minio_port}"
+  }
+  s3_use_path_style           = true
+  skip_credentials_validation = true
+  skip_metadata_api_check     = true
+  skip_requesting_account_id  = true
+}
+
 
 # --- Locals ---
 locals {
@@ -62,7 +95,7 @@ resource "docker_image" "clickhouse_keeper" {
   name = "clickhouse/clickhouse-keeper:${var.chk_version}"
 }
 resource "docker_image" "minio" {
-  name = "minio/minio:RELEASE.2025-07-23T15-54-02Z"
+  name = "minio/minio:${var.minio_version}"
 }
 resource "docker_image" "clickhouse_backup" {
   name = "altinity/clickhouse-backup:2.5.6"
@@ -97,7 +130,7 @@ resource "local_file" "config_xml" {
     cluster_name          = local.cluster_name
     super_user_name       = local.super_user_name
     super_user_password   = var.super_user_password
-    minio_port            = var.minio_port
+    local_minio_port      = var.local_minio_port
     minio_root_user       = var.minio_root_user
     minio_root_password   = var.minio_root_password
     storage_type          = var.storage_type
@@ -209,10 +242,17 @@ resource "docker_container" "ch_nodes" {
     source    = abspath("${var.clickhouse_base_path}/${each.key}/logs")
     type      = "bind"
   }
-  depends_on = [docker_container.keeper, local_file.config_xml, local_file.users_xml]
+  depends_on = [docker_container.keeper, local_file.config_xml, local_file.users_xml, aws_s3_bucket_policy.minio_storage_bucket_policy]
 }
 
 # --- MinIO (S3) ---
+
+resource "null_resource" "mk_local_minio_dir" {
+  count = var.storage_type == "s3_ssd" ? 1 : 0
+  provisioner "local-exec" {
+    command = "mkdir -p ${var.local_minio_path}"
+  }
+}
 
 # Local MinIO for S3-based storage
 resource "docker_container" "minio_local" {
@@ -225,18 +265,20 @@ resource "docker_container" "minio_local" {
   }
   ports {
     internal = 9000
-    external = 9000
+    external = var.local_minio_port
   }
   ports {
     internal = 9001
-    external = 9001
+    external = var.local_minio_port + 1
   }
-  volumes {
-    host_path      = var.local_minio_path
-    container_path = "/data"
+  mounts {
+    source = abspath(var.local_minio_path)
+    target = "/data"
+    type   = "bind"
   }
-  env     = ["MINIO_ROOT_USER=${var.minio_root_user}", "MINIO_ROOT_PASSWORD=${var.minio_root_password}"]
+  env     = ["MINIO_ROOT_USER=${var.minio_root_user}", "MINIO_ROOT_PASSWORD=${var.minio_root_password}", "CONSOLE_AGPL_LICENSE_ACCEPTED=yes"]
   command = ["server", "/data", "--console-address", ":9001"]
+  depends_on = [null_resource.mk_local_minio_dir]
 }
 
 # Remote MinIO for backups
@@ -247,25 +289,123 @@ resource "docker_container" "minio_remote_backup" {
   restart  = "always"
   ports {
     internal = 9000
-    external = 9000
+    external = var.remote_minio_port
   }
   ports {
     internal = 9001
-    external = 9001
+    external = var.remote_minio_port + 1
   }
   volumes {
     host_path      = var.remote_minio_path
     container_path = "/data"
   }
-  env     = ["MINIO_ROOT_USER=${var.minio_root_user}", "MINIO_ROOT_PASSWORD=${var.minio_root_password}"]
+  env     = ["MINIO_ROOT_USER=${var.minio_root_user}", "MINIO_ROOT_PASSWORD=${var.minio_root_password}", "CONSOLE_AGPL_LICENSE_ACCEPTED=yes"]
   command = ["server", "/data", "--console-address", ":9001"]
+}
+
+# Health Checks for MinIO
+resource "null_resource" "wait_for_remote_minio" {
+  provisioner "remote-exec" {
+    inline = [
+      "echo 'Waiting for MinIO to be ready...'",
+      "for i in {1..30}; do",
+      "  if curl -s http://localhost:${var.remote_minio_port}/minio/health/live &> /dev/null; then",
+      "    echo 'MinIO is ready!'",
+      "    break",
+      "  fi",
+      "  echo 'Waiting for MinIO... attempt $i/30'",
+      "done"
+    ]
+    connection {
+      type = "ssh"
+      user = var.remote_ssh_user
+      host = var.remote_host_name
+    }
+  }
+  depends_on = [docker_container.minio_remote_backup]
+}
+
+resource "null_resource" "wait_for_local_minio" {
+  count = var.storage_type == "s3_ssd" ? 1 : 0
+  provisioner "local-exec" {
+    command = <<EOT
+      for i in {1..30}; do
+        if curl -s "http://localhost:${var.local_minio_port}/minio/health/live" &> /dev/null; then
+          echo "Local MinIO is ready!"
+          break
+        fi
+        echo "Attempt $i/30 - Local MinIO not ready yet, waiting 10 seconds..."
+        sleep 10
+      done
+    EOT
+  }
+  depends_on = [docker_container.minio_local]
+}
+
+# --- S3 Buckets ---
+resource "aws_s3_bucket" "minio_backup_bucket" {
+  provider = aws.remote_backup
+  bucket   = "clickhouse-backups"
+  depends_on = [null_resource.wait_for_remote_minio]
+}
+
+resource "aws_s3_bucket_policy" "minio_backup_bucket_policy" {
+  provider = aws.remote_backup
+  bucket   = aws_s3_bucket.minio_backup_bucket.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = [
+          "s3:GetObject",
+        ]
+        Effect    = "Allow"
+        Principal = "*"
+        Resource = [
+          "${aws_s3_bucket.minio_backup_bucket.arn}/*",
+        ]
+      },
+    ]
+  })
+}
+
+resource "aws_s3_bucket" "minio_storage_bucket" {
+  count    = var.storage_type == "s3_ssd" ? 1 : 0
+  provider = aws.local_storage
+  bucket   = "clickhouse-storage-bucket"
+  depends_on = [null_resource.wait_for_local_minio]
+}
+
+resource "aws_s3_bucket_policy" "minio_storage_bucket_policy" {
+  count    = var.storage_type == "s3_ssd" ? 1 : 0
+  provider = aws.local_storage
+  bucket   = aws_s3_bucket.minio_storage_bucket[0].id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = [
+          "s3:GetObject",
+          "s3:PutObject",
+          "s3:DeleteObject",
+          "s3:ListBucket"
+        ]
+        Effect    = "Allow"
+        Principal = "*"
+        Resource = [
+          "${aws_s3_bucket.minio_storage_bucket[0].arn}/*",
+          aws_s3_bucket.minio_storage_bucket[0].arn
+        ]
+      },
+    ]
+  })
 }
 
 # --- ClickHouse Backup ---
 resource "docker_container" "clickhouse_backup" {
   name  = "clickhouse-backup"
   image = docker_image.clickhouse_backup.name
-  command = ["watch", "--watch-interval=86400s", "--full-interval=86400s", "--tables=^$"] # Keep container running
+  command = ["server"] # Run API server to keep container alive
   networks_advanced {
     name = docker_network.ch_net.name
   }
@@ -290,12 +430,12 @@ resource "docker_container" "clickhouse_backup" {
     "S3_BUCKET=clickhouse-backups",
     "S3_ACCESS_KEY=${var.minio_root_user}",
     "S3_SECRET_KEY=${var.minio_root_password}",
-    "S3_ENDPOINT=http://${var.remote_host_name}:${var.minio_port}",
+    "S3_ENDPOINT=http://${var.remote_host_name}:${var.remote_minio_port}",
     "S3_REGION=us-east-1",
     "S3_DISABLE_SSL=true",
     "S3_FORCE_PATH_STYLE=true"
   ]
-  depends_on = [docker_container.ch_nodes]
+  depends_on = [docker_container.ch_nodes, aws_s3_bucket_policy.minio_backup_bucket_policy]
 }
 
 # .env file

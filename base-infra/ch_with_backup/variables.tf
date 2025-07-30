@@ -1,6 +1,6 @@
 variable "clickhouse_base_path" {
   type    = string
-  default = "./volumes"
+  default = "../clickhouse/volumes"
 }
 
 variable "memory_limit" {
@@ -35,13 +35,19 @@ variable "bi_user_password" {
 variable "ch_version" {
   description = "ClickHouse server version"
   type        = string
-  default     = "24.5.1.1198"
+  default     = "25.5.2-alpine"
 }
 
 variable "chk_version" {
   description = "ClickHouse keeper version"
   type        = string
-  default     = "24.5.1.1198-alpine"
+  default     = "25.5.2-alpine"
+}
+
+variable "minio_version" {
+  description = "MinIO version"
+  type        = string
+  default     = "RELEASE.2025-07-23T15-54-02Z"
 }
 
 variable "ch_uid" {
@@ -105,8 +111,14 @@ variable "ssh_private_key_path" {
   default     = "~/.ssh/id_rsa"
 }
 
-variable "minio_port" {
-  description = "Порт для MinIO"
+variable "local_minio_port" {
+  description = "Порт для локального MinIO"
+  type        = number
+  default     = 9010
+}
+
+variable "remote_minio_port" {
+  description = "Порт для удаленного MinIO (backup)"
   type        = number
   default     = 9000
 }
@@ -124,7 +136,7 @@ variable "storage_type" {
 variable "local_minio_path" {
   description = "Путь к данным для локального MinIO на внешнем SSD"
   type        = string
-  default     = "/Volumes/Samsung_T7/minio/data"
+  default     = "/Users/principalwater/docker_volumes/minio/data"
 }
 
 variable "remote_minio_path" {

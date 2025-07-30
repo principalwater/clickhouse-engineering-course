@@ -5,11 +5,10 @@
 ## Оглавление
 - [Описание задания и цели](#описание-задания-и-цели)
 - [Архитектура решения и аппаратное обеспечение](#архитектура-решения-и-аппаратное-обеспечение)
-  - [Сценарий 1: Локальное хранение + Удаленный бэкап](#сценарий-1-локальное-хранение--удаленный-бэкап)
-  - [Сценарий 2: S3-хранение + Удаленный бэкап](#сценарий-2-s3-хранение--удаленный-бэкап)
-- [Часть 1. Развертывание и бэкап с локальным хранилищем](#часть-1-развертывание-и-бэкап-с-локальным-хранилищем)
-- [Часть 2. Переключение на S3-хранилище](#часть-2-переключение-на-s3-хранилище)
-- [Часть 3. Анализ альтернативных конфигураций](#часть-3-анализ-альтернативных-конфигураций)
+- [Часть 1. Предварительные проверки и развертывание](#часть-1-предварительные-проверки-и-развертывание)
+- [Часть 2. Сценарий с локальным хранилищем](#часть-2-сценарий-с-локальным-хранилищем)
+- [Часть 3. Сценарий с S3-хранилищем](#часть-3-сценарий-с-s3-хранилищем)
+- [Часть 4. Анализ альтернативных конфигураций](#часть-4-анализ-альтернативных-конфигураций)
 - [Общие выводы по заданию](#общие-выводы-по-заданию)
 - [Список источников](#список-источников)
 
@@ -24,94 +23,139 @@
 Для выполнения задания используется гибридная, полностью автоматизированная архитектура, описанная в модуле [`base-infra/ch_with_backup`](../base-infra/ch_with_backup/README.md).
 
 ### Аппаратное обеспечение
--   **Хост-машина (`mac-studio-foxes-home.local`):**
-    -   **Модель:** Mac Studio (2023)
-    -   **Процессор:** Apple M2 Max
-    -   **Память:** 32 ГБ
-    -   **Накопитель (основной):** Встроенный SSD Apple
--   **Внешний накопитель (локальный S3):**
-    -   **Модель:** Samsung Portable SSD T7
-    -   **Объем:** 2 ТБ
-    -   **Подключение:** Thunderbolt 4
--   **Удаленный сервер (`water-rpi.local`):**
-    -   **Модель:** Raspberry Pi 5
-    -   **Память:** 8 ГБ
-    -   **Накопитель (для бэкапов):** Samsung PM991a NVMe 512 ГБ (подключен через PCIe)
-    -   **ОС:** Debian 12 (Bookworm)
+-   **Хост-машина (`mac-studio-foxes-home.local`):** Mac Studio (M2 Max, 32 ГБ RAM)
+-   **Внешний накопитель (локальный S3):** Samsung Portable SSD T7 2 ТБ (Thunderbolt 4)
+-   **Удаленный сервер (`water-rpi.local`):** Raspberry Pi 5 (8 ГБ RAM, 512 ГБ NVMe SSD), Debian 12 (Bookworm)
 
-### Сценарий 1: Локальное хранение + Удаленный бэкап
+---
+
+## Часть 1. Предварительные проверки и развертывание
+Перед началом работы необходимо убедиться в доступности всех компонентов и развернуть базовую инфраструктуру.
+
+1.  **Настройте и проверьте SSH-доступ к Docker:**
+    Для того чтобы Terraform мог управлять Docker на удаленном хосте, необходимо обеспечить бесшовное SSH-подключение.
+    
+    *   **Настройка SSH-клиента (рекомендуется):** Добавьте в ваш файл `~/.ssh/config` запись для удаленного хоста. Это позволит не указывать ключ каждый раз.
+        ```
+        Host water-rpi.local
+          HostName water-rpi.local
+          User principalwater
+          IdentityFile ~/.ssh/water-rpi
+        ```
+    *   **Проверка:** После настройки `~/.ssh/config` (или добавления ключа в `ssh-agent`), выполните команду на вашей локальной машине. Она должна выполниться без ошибок и показать список (возможно, пустой) контейнеров на удаленном хосте.
+        ```sh
+        docker --host ssh://water-rpi.local ps
+        ```
+    Если команда не работает, убедитесь, что пользователь `principalwater` на `water-rpi.local` состоит в группе `docker`.
+
+2.  **Проверка доступности внешнего SSD (для Сценария 2):**
+    Убедитесь, что диск смонтирован и доступен по пути, указанному в `local_minio_path`.
+    ```sh
+    ls -l /Volumes/t7_ssd
+    ```
+
+---
+
+## Часть 2. Сценарий с локальным хранилищем
 -   **Данные ClickHouse:** Хранятся на локальном SSD хост-машины (`mac-studio-foxes-home.local`). Это обеспечивает максимальную производительность для "горячих" данных.
--   **Резервные копии:** Сохраняются на удаленный сервер `water-rpi.local` в S3-хранилище MinIO.
+-   **Резервные копии:** Сохраняются на удаленный S3 (MinIO на `water-rpi.local`).
 
-### Сценарий 2: S3-хранение + Удаленный бэкап
+### 2.1. Развертывание
+Разворачиваем конфигурацию с локальным хранением (`storage_type = "local_ssd"`).
+```sh
+cd base-infra/ch_with_backup
+terraform apply -auto-approve -var="storage_type=local_ssd"
+```
+*Результат:*
+
+<img src="../screenshots/hw13_storage-policy-backup/01_deploy_local.png" alt="Развертывание Сценария 1" width="800"/>
+
+### 2.2. Создание тестовых данных
+```sql
+CREATE DATABASE IF NOT EXISTS test_db ON CLUSTER dwh_test;
+CREATE TABLE IF NOT EXISTS test_db.sample_table ON CLUSTER dwh_test (id UInt64, data String)
+ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/sample_table/{uuid}', '{replica}') ORDER BY id;
+INSERT INTO test_db.sample_table SELECT number, randomString(10) FROM numbers(1000);
+```
+
+### 2.3. Создание и выгрузка резервной копии
+Будет использована команда `create_remote`, которая атомарно выполняет два действия:
+1.  **`create`**: Создает локальную резервную копию на диске, доступном контейнеру `clickhouse-backup`.
+2.  **`upload`**: Сразу же выгружает созданную копию в удаленное S3-хранилище.
+```bash
+# Создаем бэкап с уникальным именем, содержащим дату и время
+docker exec clickhouse-backup clickhouse-backup create_remote "backup_local_$(date +%Y%m%d_%H%M%S)"
+```
+*Результат создания бэкапа:*
+
+<img src="../screenshots/hw13_storage-policy-backup/02_create_backup_local.png" alt="Создание бэкапа для Сценария 1" width="800"/>
+
+### 2.4. Имитация сбоя и восстановление
+1.  **Удаляем таблицу:**
+    ```bash
+    docker exec -i clickhouse-01 clickhouse-client --user ${TF_VAR_super_user_name} --password ${TF_VAR_super_user_password} --query "DROP TABLE IF EXISTS test_db.sample_table ON CLUSTER dwh_test SYNC;"
+    ```
+2.  **Восстанавливаем из бэкапа:**
+    Для восстановления необходимо указать имя последней резервной копии.
+    ```bash
+    LATEST_BACKUP=$(docker exec clickhouse-backup clickhouse-backup list remote | grep '^backup' | tail -1 | awk '{print $1}')
+    docker exec clickhouse-backup clickhouse-backup restore_remote $LATEST_BACKUP
+    ```
+3.  **Проверяем данные:**
+    ```bash
+    docker exec -i clickhouse-01 clickhouse-client --user ${TF_VAR_super_user_name} --password ${TF_VAR_super_user_password} --query "SELECT count() FROM test_db.sample_table;"
+    ```
+*Результат повреждения данных и восстановления из бэкапа:*
+
+<img src="../screenshots/hw13_storage-policy-backup/03_01_drop_local.png" alt="Восстановление в Сценарии 1" width="600"/>
+
+<img src="../screenshots/hw13_storage-policy-backup/03_02_restore_local.png" alt="Восстановление в Сценарии 1" width="800"/>
+
+---
+
+## Часть 3. Сценарий с S3-хранилищем
 -   **Данные ClickHouse:** Хранятся на "локальном" S3-хранилище MinIO, которое развернуто на внешнем SSD Samsung T7, подключенном к хост-машине. Этот сценарий демонстрирует разделение `compute` и `storage`.
--   **Резервные копии:** Также сохраняются на удаленный сервер `water-rpi.local`.
+-   **Резервные копии:** Сохраняются на удаленный S3 (MinIO на `water-rpi.local`).
+
+### 3.1. Переключение и развертывание
+Уничтожаем предыдущую конфигурацию и разворачиваем новую.
+```sh
+cd base-infra/ch_with_backup
+terraform destroy -auto-approve
+terraform apply -auto-approve -var="storage_type=s3_ssd"
+```
+*Результат:* <img src="../screenshots/hw13_storage-policy-backup/04_deploy_s3.png" alt="Развертывание Сценария 2" width="600"/>
+
+### 3.2. Создание таблицы с Storage Policy
+Создаем таблицу, явно указывая политику `s3_main`, чтобы данные хранились на локальном S3.
+```sql
+CREATE TABLE test_db.sample_table_s3 ON CLUSTER dwh_test (id UInt64, data String)
+ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/sample_table_s3/{uuid}', '{replica}')
+ORDER BY id
+SETTINGS storage_policy = 's3_main';
+INSERT INTO test_db.sample_table_s3 SELECT number, randomString(10) FROM numbers(1000);
+```
+
+### 3.3. Проверка хранения данных
+Запрос к `system.parts` покажет, что данные хранятся на диске `s3_cache`.
+```sql
+SELECT table, disk_name, path FROM system.parts WHERE database = 'test_db' AND table = 'sample_table_s3' LIMIT 5;
+```
+*Результат:* <img src="../screenshots/hw13_storage-policy-backup/05_check_s3_storage.png" alt="Проверка хранения на S3" width="800"/>
+
+### 3.4. Резервное копирование и восстановление
+Процесс полностью аналогичен Сценарию 1.
+```bash
+docker exec clickhouse-backup clickhouse-backup create_remote "backup_s3_$(date +%Y%m%d_%H%M%S)"
+# ... drop table ...
+LATEST_BACKUP=$(docker exec clickhouse-backup clickhouse-backup list remote | grep '^backup' | tail -1 | awk '{print $1}')
+docker exec clickhouse-backup clickhouse-backup restore_remote $LATEST_BACKUP
+```
+*Результат:* <img src="../screenshots/hw13_storage-policy-backup/06_backup_restore_s3.png" alt="Бэкап и восстановление в Сценарии 2" width="800"/>
 
 ---
 
-## Часть 1. Развертывание и бэкап с локальным хранилищем
-
-1.  **Развертывание:**
-    Запускаем конфигурацию по умолчанию (`storage_type = "local_ssd"`).
-    ```sh
-    cd base-infra/ch_with_backup
-    terraform apply -auto-approve
-    ```
-2.  **Создание и наполнение таблицы:**
-    ```sql
-    CREATE TABLE default.sample_table ON CLUSTER dwh_test (id UInt64, data String)
-    ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/sample_table', '{replica}') ORDER BY id;
-    INSERT INTO default.sample_table SELECT number, randomString(10) FROM numbers(1000);
-    ```
-3.  **Резервное копирование:**
-    Выполняется с помощью `clickhouse-backup` на S3 (MinIO на `water-rpi.local`).
-    ```bash
-    docker exec clickhouse-backup clickhouse-backup create backup_local_storage
-    ```
-4.  **Восстановление:**
-    После удаления таблицы (`DROP TABLE default.sample_table ON CLUSTER dwh_test;`), восстановление выполняется командой:
-    ```bash
-    docker exec clickhouse-backup clickhouse-backup restore backup_local_storage
-    ```
-*Результаты выполнения шагов для Сценария 1:*
-
-<img src="../screenshots/hw13_storage-policy-backup/01_scenario_local.png" alt="Сценарий 1" width="800"/>
-
----
-
-## Часть 2. Переключение на S3-хранилище
-
-1.  **Переконфигурация и развертывание:**
-    Уничтожаем предыдущую конфигурацию и разворачиваем новую, указав `storage_type = "s3_ssd"`.
-    ```sh
-    terraform destroy -auto-approve
-    terraform apply -var="storage_type=s3_ssd" -auto-approve
-    ```
-2.  **Создание таблицы с `Storage Policy`:**
-    Теперь при создании таблицы явно указываем политику `s3_main`, чтобы данные хранились на локальном S3 (внешний SSD).
-    ```sql
-    CREATE TABLE default.sample_table_s3 ON CLUSTER dwh_test (id UInt64, data String)
-    ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/sample_table_s3', '{replica}')
-    ORDER BY id
-    SETTINGS storage_policy = 's3_main';
-    INSERT INTO default.sample_table_s3 SELECT number, randomString(10) FROM numbers(1000);
-    ```
-3.  **Проверка хранения данных:**
-    Запрос к `system.parts` покажет, что данные таблицы `sample_table_s3` хранятся на диске `s3_cache`.
-    ```sql
-    SELECT name, disk_name FROM system.parts WHERE table = 'sample_table_s3' LIMIT 5;
-    ```
-4.  **Резервное копирование и восстановление:**
-    Процесс бэкапа и восстановления аналогичен Сценарию 1, но теперь мы бэкапим таблицу, данные которой уже находятся в S3.
-
-*Результаты выполнения шагов для Сценария 2:*
-
-<img src="../screenshots/hw13_storage-policy-backup/02_scenario_s3.png" alt="Сценарий 2" width="800"/>
-
----
-
-## Часть 3. Анализ альтернативных конфигураций
-
+## Часть 4. Анализ альтернативных конфигураций
 На базе имеющегося оборудования возможны и другие интересные конфигурации:
 -   **Hot/Cold Storage:** Можно настроить `Storage Policy`, которая будет хранить "горячие" данные (например, за последний месяц) на быстром локальном SSD, а "холодные" — автоматически перемещать на более медленный, но объемный S3 (внешний SSD или удаленный сервер).
 -   **Бэкап на локальный S3:** В случае отсутствия удаленного сервера, можно развернуть MinIO на внешнем SSD и использовать его и для хранения данных, и для бэкапов, разнеся их по разным бакетам.
