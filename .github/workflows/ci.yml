@@ -122,17 +122,17 @@ jobs:
            echo "[LOAD VARS] Loaded variables: $VARS"
            echo "vars=$VARS" >> $GITHUB_OUTPUT
 
-      - name: Clean legacy state for ch_with_storage
+      - name: Clean state and config for ch_with_storage
         run: |
           if [[ "${{ matrix.dir }}" == *"ch_with_storage"* ]]; then
-            echo "[STATE CLEANUP] Cleaning legacy remote provider state"
-            # Remove legacy state files if they exist
+            echo "[CI CLEANUP] Cleaning state and config for CI environment"
+            # Remove ALL state files for clean CI run
             rm -f terraform.tfstate terraform.tfstate.backup
-            # Remove legacy lock info  
             rm -rf .terraform.tfstate.lock.info
-            # Also clean .terraform directory to force fresh init
             rm -rf .terraform/
-            echo "[STATE CLEANUP] Completed state cleanup for ch_with_storage"
+            # Remove any local volumes that might exist
+            rm -rf volumes/
+            echo "[CI CLEANUP] Completed cleanup for ch_with_storage CI run"
           fi
         working-directory: ${{ matrix.dir }}
 
@@ -165,15 +165,16 @@ jobs:
           set -ex  # Enable detailed output and stop on errors.
           echo "[TF PLAN] Running terraform plan in ${{ matrix.dir }}"  # Before plan.
           
-          # CI-specific overrides for ch_with_storage to avoid local network dependencies
+          # CI-specific overrides for ch_with_storage to avoid network dependencies
           if [[ "${{ matrix.dir }}" == *"ch_with_storage"* ]]; then
             echo "[TF PLAN] Applying CI overrides for ch_with_storage module"
             terraform plan -out=tfplan ${{ steps.load-vars.outputs.vars }} \
               -var="storage_type=local_ssd" \
               -var="enable_remote_backup=false" \
-              -var="remote_host_name=localhost" \
+              -var="clickhouse_base_path=/tmp/ci-clickhouse" \
               -var="local_minio_path=/tmp/ci-minio" \
-              -var="remote_minio_path=/tmp/ci-remote-minio"
+              -var="remote_minio_path=/tmp/ci-remote-minio" \
+              -var="remote_host_name=ci-dummy-host"
           else
             terraform plan -out=tfplan ${{ steps.load-vars.outputs.vars }}
           fi
