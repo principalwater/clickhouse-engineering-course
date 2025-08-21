@@ -13,40 +13,24 @@ jobs:
   find-terraform-dirs:
     runs-on: ubuntu-latest
     outputs:
-      tf_dirs: ${{ steps.set-dirs.outputs.tf_dirs }}
+      dirs: ${{ steps.find-dirs.outputs.dirs }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
       - name: Find Terraform directories
-        id: set-dirs
+        id: find-dirs
         run: |
-          # Find all directories containing main.tf files, excluding those ignored by .gitignore.
-          mapfile -t dirs < <(find . -type f -name 'main.tf' \
-            | grep -vFf <(git check-ignore $(find . -type f -name 'main.tf') 2>/dev/null || true) \
-            | xargs -I {} dirname {} | sort -u)
-          echo "Found Terraform directories:"
-          printf '%s\n' "${dirs[@]}"
-          clean_dirs=()
-          for d in "${dirs[@]}"; do
-            d_clean=$(echo "$d" | xargs)
-            [ -n "$d_clean" ] && clean_dirs+=("$d_clean")
-          done
-          printf '%s\n' "${clean_dirs[@]}" | jq -R . | jq -s . | tr -d ' \n' > tf_dirs.json
-          echo "tf_dirs=$(cat tf_dirs.json)" >> $GITHUB_OUTPUT
-
-      - name: Inspect tf_dirs.json
-        run: |
-          # Display the contents of tf_dirs.json for verification.
-          echo "[INSPECT] Contents of tf_dirs.json:"
-          cat tf_dirs.json
+          # Find directories containing main.tf files (but exclude modules subdirectories)
+          dirs=$(find . -name "main.tf" -not -path "*/modules/*" | xargs dirname | jq -R -s -c 'split("\n")[:-1]')
+          echo "dirs=$dirs" >> $GITHUB_OUTPUT
+          echo "Found Terraform directories: $dirs"
 
   terraform:
-    needs: find-terraform-dirs
     runs-on: ubuntu-latest
+    needs: find-terraform-dirs
     strategy:
       matrix:
-        dir: ${{ fromJson(needs.find-terraform-dirs.outputs.tf_dirs) }}
+        dir: ${{ fromJson(needs.find-terraform-dirs.outputs.dirs) }}
     defaults:
       run:
         shell: bash
