@@ -125,17 +125,17 @@ jobs:
            echo "[LOAD VARS] Loaded variables: $VARS"
            echo "vars=$VARS" >> $GITHUB_OUTPUT
 
-      - name: Clean state and config for ch_with_storage
+      - name: Clean state and config for ch_with_storage modules
         run: |
           if [[ "${{ matrix.dir }}" == *"ch_with_storage"* ]]; then
             echo "[CI CLEANUP] Cleaning state and config for CI environment"
-            # Remove ALL state files for clean CI run
-            rm -f terraform.tfstate terraform.tfstate.backup
-            rm -rf .terraform.tfstate.lock.info
-            rm -rf .terraform/
+            # Remove ALL state files for clean CI run (both root and modules)
+            find . -name "terraform.tfstate*" -delete
+            find . -name ".terraform.tfstate.lock.info" -delete
+            find . -type d -name ".terraform" -exec rm -rf {} + 2>/dev/null || true
             # Remove any local volumes that might exist
-            rm -rf volumes/
-            echo "[CI CLEANUP] Completed cleanup for ch_with_storage CI run"
+            rm -rf volumes/ 2>/dev/null || true
+            echo "[CI CLEANUP] Completed cleanup for all ch_with_storage directories"
           fi
         working-directory: ${{ matrix.dir }}
 
