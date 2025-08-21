@@ -63,6 +63,9 @@ jobs:
       SA_USERNAME: ${{ secrets.SA_USERNAME }}
       SUPERSET_SECRET_KEY: ${{ secrets.SUPERSET_SECRET_KEY }}
       SUPER_USER_PASSWORD: ${{ secrets.SUPER_USER_PASSWORD }}
+      
+      # Set storage_type for CI context
+      storage_type: local_ssd
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -169,12 +172,9 @@ jobs:
           if [[ "${{ matrix.dir }}" == *"ch_with_storage"* ]]; then
             echo "[TF PLAN] Applying CI overrides for ch_with_storage module"
             terraform plan -out=tfplan ${{ steps.load-vars.outputs.vars }} \
-              -var="storage_type=local_ssd" \
-              -var="enable_remote_backup=false" \
               -var="clickhouse_base_path=/tmp/ci-clickhouse" \
               -var="local_minio_path=/tmp/ci-minio" \
-              -var="remote_minio_path=/tmp/ci-remote-minio" \
-              -var="remote_host_name=ci-dummy-host"
+              -var="remote_minio_path=/tmp/ci-remote-minio"
           else
             terraform plan -out=tfplan ${{ steps.load-vars.outputs.vars }}
           fi
