@@ -124,12 +124,12 @@ variable "remote_minio_port" {
 }
 
 variable "storage_type" {
-  description = "Тип основного хранилища для ClickHouse: 'local_ssd' или 's3_ssd'"
+  description = "Тип основного хранилища для ClickHouse: 'local_ssd', 's3_ssd', или 'local_ssd_backup'"
   type        = string
   default     = "local_ssd"
   validation {
-    condition     = contains(["local_ssd", "s3_ssd"], var.storage_type)
-    error_message = "Допустимые значения для storage_type: 'local_ssd' или 's3_ssd'."
+    condition     = contains(["local_ssd", "s3_ssd", "local_ssd_backup"], var.storage_type)
+    error_message = "Допустимые значения для storage_type: 'local_ssd', 's3_ssd', или 'local_ssd_backup'."
   }
 }
 
@@ -161,4 +161,10 @@ variable "bucket_storage" {
   description = "Имя бакета для S3 хранилища"
   type        = string
   default     = "clickhouse-storage-bucket"
+}
+
+variable "enable_remote_backup" {
+  description = "Включить удаленный backup MinIO"
+  type        = bool
+  default     = false
 }

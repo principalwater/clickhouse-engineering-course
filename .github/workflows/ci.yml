@@ -55,7 +55,10 @@ jobs:
       BI_USER_PASSWORD: ${{ secrets.BI_USER_PASSWORD }}
       CLICKHOUSE_BI_USER_PASSWORD: ${{ secrets.CLICKHOUSE_BI_USER_PASSWORD }}
       CLICKHOUSE_SUPER_USER_PASSWORD: ${{ secrets.CLICKHOUSE_SUPER_USER_PASSWORD }}
+      MINIO_ROOT_PASSWORD: ${{ secrets.MINIO_ROOT_PASSWORD }}
+      MINIO_ROOT_USER: ${{ secrets.MINIO_ROOT_USER }}
       PG_PASSWORD: ${{ secrets.PG_PASSWORD }}
+      REMOTE_SSH_USER: ${{ secrets.REMOTE_SSH_USER }}
       SA_PASSWORD: ${{ secrets.SA_PASSWORD }}
       SA_USERNAME: ${{ secrets.SA_USERNAME }}
       SUPERSET_SECRET_KEY: ${{ secrets.SUPERSET_SECRET_KEY }}
@@ -147,7 +150,20 @@ jobs:
         run: |
           set -ex  # Enable detailed output and stop on errors.
           echo "[TF PLAN] Running terraform plan in ${{ matrix.dir }}"  # Before plan.
-          terraform plan -out=tfplan ${{ steps.load-vars.outputs.vars }}
+          
+          # CI-specific overrides for ch_with_storage to avoid local network dependencies
+          if [[ "${{ matrix.dir }}" == *"ch_with_storage"* ]]; then
+            echo "[TF PLAN] Applying CI overrides for ch_with_storage module"
+            terraform plan -out=tfplan ${{ steps.load-vars.outputs.vars }} \
+              -var="storage_type=local_ssd" \
+              -var="enable_remote_backup=false" \
+              -var="remote_host_name=localhost" \
+              -var="local_minio_path=/tmp/ci-minio" \
+              -var="remote_minio_path=/tmp/ci-remote-minio"
+          else
+            terraform plan -out=tfplan ${{ steps.load-vars.outputs.vars }}
+          fi
+          
           terraform show -no-color tfplan > plan.txt
           echo "[TF PLAN] Completed terraform plan and saved plan.txt"  # After plan.
         working-directory: ${{ matrix.dir }}
