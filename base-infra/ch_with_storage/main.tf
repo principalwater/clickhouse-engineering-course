@@ -56,56 +56,56 @@ module "clickhouse_cluster" {
   source = "./modules/clickhouse-cluster"
 
   providers = {
-    docker.remote_host    = docker.remote_host
-    aws.remote_backup     = aws.remote_backup
-    aws.local_storage     = aws.local_storage
+    docker.remote_host = docker.remote_host
+    aws.remote_backup  = aws.remote_backup
+    aws.local_storage  = aws.local_storage
   }
 
   # Base configuration
-  clickhouse_base_path    = var.clickhouse_base_path
-  memory_limit            = var.memory_limit
-  
+  clickhouse_base_path = var.clickhouse_base_path
+  memory_limit         = var.memory_limit
+
   # Users
-  super_user_name         = var.super_user_name
-  bi_user_name            = var.bi_user_name
-  super_user_password     = var.super_user_password
-  bi_user_password        = var.bi_user_password
-  
+  super_user_name     = var.super_user_name
+  bi_user_name        = var.bi_user_name
+  super_user_password = var.super_user_password
+  bi_user_password    = var.bi_user_password
+
   # Versions
-  ch_version              = var.ch_version
-  chk_version             = var.chk_version
-  minio_version           = var.minio_version
-  
+  ch_version    = var.ch_version
+  chk_version   = var.chk_version
+  minio_version = var.minio_version
+
   # System
-  ch_uid                  = var.ch_uid
-  ch_gid                  = var.ch_gid
-  
+  ch_uid = var.ch_uid
+  ch_gid = var.ch_gid
+
   # Ports
-  use_standard_ports      = var.use_standard_ports
-  ch_http_port            = var.ch_http_port
-  ch_tcp_port             = var.ch_tcp_port
-  ch_replication_port     = var.ch_replication_port
-  local_minio_port        = var.local_minio_port
-  remote_minio_port       = var.remote_minio_port
-  
+  use_standard_ports  = var.use_standard_ports
+  ch_http_port        = var.ch_http_port
+  ch_tcp_port         = var.ch_tcp_port
+  ch_replication_port = var.ch_replication_port
+  local_minio_port    = var.local_minio_port
+  remote_minio_port   = var.remote_minio_port
+
   # MinIO and Storage
-  minio_root_user         = var.minio_root_user
-  minio_root_password     = var.minio_root_password
-  storage_type            = var.storage_type
-  local_minio_path        = var.local_minio_path
-  remote_minio_path       = var.remote_minio_path
-  
+  minio_root_user     = var.minio_root_user
+  minio_root_password = var.minio_root_password
+  storage_type        = var.storage_type
+  local_minio_path    = var.local_minio_path
+  remote_minio_path   = var.remote_minio_path
+
   # SSH and Remote
-  remote_ssh_user         = var.remote_ssh_user
-  ssh_private_key_path    = var.ssh_private_key_path
-  remote_host_name        = var.remote_host_name
-  
+  remote_ssh_user      = var.remote_ssh_user
+  ssh_private_key_path = var.ssh_private_key_path
+  remote_host_name     = var.remote_host_name
+
   # Buckets
-  bucket_backup           = var.bucket_backup
-  bucket_storage          = var.bucket_storage
-  
+  bucket_backup  = var.bucket_backup
+  bucket_storage = var.bucket_storage
+
   # Feature flags
-  enable_remote_backup    = var.enable_remote_backup
+  enable_remote_backup = var.enable_remote_backup
 }
 
 # .env file

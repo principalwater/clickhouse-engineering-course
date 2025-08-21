@@ -4,7 +4,7 @@ output "clickhouse_http_port" {
 }
 
 output "clickhouse_tcp_port" {
-  description = "TCP порт для доступа к ClickHouse"  
+  description = "TCP порт для доступа к ClickHouse"
   value       = module.clickhouse_cluster.clickhouse_tcp_port
 }
 

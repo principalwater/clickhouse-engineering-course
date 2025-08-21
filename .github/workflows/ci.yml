@@ -122,6 +122,20 @@ jobs:
            echo "[LOAD VARS] Loaded variables: $VARS"
            echo "vars=$VARS" >> $GITHUB_OUTPUT
 
+      - name: Clean legacy state for ch_with_storage
+        run: |
+          if [[ "${{ matrix.dir }}" == *"ch_with_storage"* ]]; then
+            echo "[STATE CLEANUP] Cleaning legacy remote provider state"
+            # Remove legacy state files if they exist
+            rm -f terraform.tfstate terraform.tfstate.backup
+            # Remove legacy lock info  
+            rm -rf .terraform.tfstate.lock.info
+            # Also clean .terraform directory to force fresh init
+            rm -rf .terraform/
+            echo "[STATE CLEANUP] Completed state cleanup for ch_with_storage"
+          fi
+        working-directory: ${{ matrix.dir }}
+
       - name: Terraform Init
         run: |
           set -ex  # Enable detailed output and stop on errors.

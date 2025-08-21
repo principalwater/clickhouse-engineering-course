@@ -407,9 +407,9 @@ resource "docker_container" "ch_nodes" {
     }
   }
   depends_on = [
-    docker_container.keeper, 
-    local_file.config_xml, 
-    local_file.users_xml, 
+    docker_container.keeper,
+    local_file.config_xml,
+    local_file.users_xml,
     local_file.storage_config_xml,
     null_resource.remote_minio_bucket,
     null_resource.local_storage_minio_bucket,
