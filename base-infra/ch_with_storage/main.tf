@@ -20,7 +20,7 @@ provider "docker" {}
 
 provider "docker" {
   alias = "remote_host"
-  host  = "ssh://${var.remote_ssh_user}@${var.remote_host_name}"
+  host  = var.storage_type == "local_ssd" ? "unix:///var/run/docker.sock" : "ssh://${var.remote_ssh_user}@${var.remote_host_name}"
 }
 
 provider "aws" {
