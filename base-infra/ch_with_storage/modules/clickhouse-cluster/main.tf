@@ -20,6 +20,20 @@ locals {
   super_user_password_sha256 = sha256(var.super_user_password)
   bi_user_password_sha256    = sha256(var.bi_user_password)
   cluster_name               = "dwh_test"
+  
+  # Project and module labels for container grouping
+  project_name = "clickhouse-engineering-course"
+  module_name  = "clickhouse-cluster"
+  
+  # Common labels for all containers
+  common_labels = {
+    "com.docker.compose.project" = local.project_name
+    "com.docker.compose.service" = local.module_name
+    "project.name"               = local.project_name
+    "module.name"                = local.module_name
+    "terraform.workspace"        = terraform.workspace
+    "managed-by"                 = "terraform"
+  }
 
   keeper_nodes = [
     { name = "clickhouse-keeper-01", id = 1, host = "clickhouse-keeper-01", tcp_port = 9181, raft_port = 9234 },
@@ -73,7 +87,28 @@ resource "null_resource" "cleanup_preprocessed_configs" {
 
 # Network
 resource "docker_network" "ch_net" {
-  name = "clickhouse-net"
+  name = "${local.project_name}-network"
+  
+  labels {
+    label = "com.docker.compose.project"
+    value = local.project_name
+  }
+  labels {
+    label = "com.docker.compose.service"
+    value = local.module_name
+  }
+  labels {
+    label = "com.docker.compose.network"
+    value = "clickhouse-cluster"
+  }
+  labels {
+    label = "component.type"
+    value = "network"
+  }
+  labels {
+    label = "managed-by"
+    value = "terraform"
+  }
 }
 
 # Images
@@ -212,6 +247,31 @@ resource "docker_container" "keeper" {
     aliases = [each.key]
   }
   restart = "unless-stopped"
+  
+  labels {
+    label = "com.docker.compose.project"
+    value = local.project_name
+  }
+  labels {
+    label = "com.docker.compose.service"
+    value = each.key
+  }
+  labels {
+    label = "component.type"
+    value = "clickhouse-keeper"
+  }
+  labels {
+    label = "component.node"
+    value = each.key
+  }
+  labels {
+    label = "keeper.id"
+    value = tostring(each.value.id)
+  }
+  labels {
+    label = "managed-by"
+    value = "terraform"
+  }
   mounts {
     target    = "/etc/clickhouse-keeper/keeper_config.xml"
     source    = abspath("${var.clickhouse_base_path}/${each.key}/etc/clickhouse-keeper/keeper_config.xml")
@@ -248,6 +308,27 @@ resource "docker_container" "minio_local" {
   restart = "always"
   networks_advanced {
     name = docker_network.ch_net.name
+  }
+  
+  labels {
+    label = "com.docker.compose.project"
+    value = local.project_name
+  }
+  labels {
+    label = "com.docker.compose.service"
+    value = "minio-local-storage"
+  }
+  labels {
+    label = "component.type"
+    value = "minio"
+  }
+  labels {
+    label = "minio.purpose"
+    value = "local-storage"
+  }
+  labels {
+    label = "managed-by"
+    value = "terraform"
   }
   ports {
     internal = 9000
@@ -300,6 +381,27 @@ resource "docker_container" "minio_local_backup" {
   networks_advanced {
     name = docker_network.ch_net.name
   }
+  
+  labels {
+    label = "com.docker.compose.project"
+    value = local.project_name
+  }
+  labels {
+    label = "com.docker.compose.service"
+    value = "minio-local-backup"
+  }
+  labels {
+    label = "component.type"
+    value = "minio"
+  }
+  labels {
+    label = "minio.purpose"
+    value = "local-backup"
+  }
+  labels {
+    label = "managed-by"
+    value = "terraform"
+  }
   ports {
     internal = 9000
     external = var.local_minio_port + 10
@@ -342,6 +444,27 @@ resource "docker_container" "minio_remote_backup" {
   name     = "minio-remote-backup"
   image    = docker_image.minio.name
   restart  = "always"
+  
+  labels {
+    label = "com.docker.compose.project"
+    value = local.project_name
+  }
+  labels {
+    label = "com.docker.compose.service"
+    value = "minio-remote-backup"
+  }
+  labels {
+    label = "component.type"
+    value = "minio"
+  }
+  labels {
+    label = "minio.purpose"
+    value = "remote-backup"
+  }
+  labels {
+    label = "managed-by"
+    value = "terraform"
+  }
   ports {
     internal = 9000
     external = var.remote_minio_port
@@ -426,6 +549,35 @@ resource "docker_container" "ch_nodes" {
     name    = docker_network.ch_net.name
     aliases = [each.key]
   }
+  
+  labels {
+    label = "com.docker.compose.project"
+    value = local.project_name
+  }
+  labels {
+    label = "com.docker.compose.service"
+    value = each.key
+  }
+  labels {
+    label = "component.type"
+    value = "clickhouse-server"
+  }
+  labels {
+    label = "component.node"
+    value = each.key
+  }
+  labels {
+    label = "clickhouse.shard"
+    value = tostring(each.value.shard)
+  }
+  labels {
+    label = "clickhouse.replica"
+    value = tostring(each.value.replica)
+  }
+  labels {
+    label = "managed-by"
+    value = "terraform"
+  }
   dynamic "ports" {
     for_each = each.key == "clickhouse-01" ? [1] : []
     content {
@@ -489,11 +641,32 @@ resource "docker_container" "ch_nodes" {
 # Remote backup (to Raspberry Pi)
 resource "docker_container" "clickhouse_backup_remote" {
   count   = var.enable_remote_backup ? 1 : 0
-  name    = "clickhouse-backup"
+  name    = "clickhouse-backup-remote"
   image   = docker_image.clickhouse_backup.name
   command = ["server"] # Run API server to keep container alive
   networks_advanced {
     name = docker_network.ch_net.name
+  }
+  
+  labels {
+    label = "com.docker.compose.project"
+    value = local.project_name
+  }
+  labels {
+    label = "com.docker.compose.service"
+    value = "clickhouse-backup-remote"
+  }
+  labels {
+    label = "component.type"
+    value = "clickhouse-backup"
+  }
+  labels {
+    label = "backup.type"
+    value = "remote"
+  }
+  labels {
+    label = "managed-by"
+    value = "terraform"
   }
   mounts {
     target    = "/var/lib/clickhouse"
@@ -527,11 +700,32 @@ resource "docker_container" "clickhouse_backup_remote" {
 # Local backup (to Samsung T7 SSD)
 resource "docker_container" "clickhouse_backup_local" {
   count   = var.storage_type == "local_ssd_backup" ? 1 : 0
-  name    = "clickhouse-backup"
+  name    = "clickhouse-backup-local"
   image   = docker_image.clickhouse_backup.name
   command = ["server"] # Run API server to keep container alive
   networks_advanced {
     name = docker_network.ch_net.name
+  }
+  
+  labels {
+    label = "com.docker.compose.project"
+    value = local.project_name
+  }
+  labels {
+    label = "com.docker.compose.service"
+    value = "clickhouse-backup-local"
+  }
+  labels {
+    label = "component.type"
+    value = "clickhouse-backup"
+  }
+  labels {
+    label = "backup.type"
+    value = "local-ssd"
+  }
+  labels {
+    label = "managed-by"
+    value = "terraform"
   }
   mounts {
     target    = "/var/lib/clickhouse"
@@ -565,11 +759,32 @@ resource "docker_container" "clickhouse_backup_local" {
 # S3 backup (to same local MinIO, different bucket)
 resource "docker_container" "clickhouse_backup_s3" {
   count   = var.storage_type == "s3_ssd" && !var.enable_remote_backup ? 1 : 0
-  name    = "clickhouse-backup"
+  name    = "clickhouse-backup-s3"
   image   = docker_image.clickhouse_backup.name
   command = ["server"] # Run API server to keep container alive
   networks_advanced {
     name = docker_network.ch_net.name
+  }
+  
+  labels {
+    label = "com.docker.compose.project"
+    value = local.project_name
+  }
+  labels {
+    label = "com.docker.compose.service"
+    value = "clickhouse-backup-s3"
+  }
+  labels {
+    label = "component.type"
+    value = "clickhouse-backup"
+  }
+  labels {
+    label = "backup.type"
+    value = "s3-local"
+  }
+  labels {
+    label = "managed-by"
+    value = "terraform"
   }
   mounts {
     target    = "/var/lib/clickhouse"
