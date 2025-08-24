@@ -42,6 +42,35 @@ locals {
 
 # --- Resources ---
 
+# Force config recreation trigger
+resource "null_resource" "force_config_recreation" {
+  triggers = {
+    storage_type = var.storage_type
+    timestamp    = timestamp()
+  }
+}
+
+# Clean preprocessed configs to force ClickHouse to reload from templates
+resource "null_resource" "cleanup_preprocessed_configs" {
+  for_each = { for n in local.clickhouse_nodes : n.name => n }
+  
+  provisioner "local-exec" {
+    command = <<EOT
+      # Clean preprocessed configs to force recreation from templates
+      if [ -d "${var.clickhouse_base_path}/${each.key}/data/preprocessed_configs" ]; then
+        echo "Cleaning preprocessed configs for ${each.key} to force template reload..."
+        rm -rf ${var.clickhouse_base_path}/${each.key}/data/preprocessed_configs/*
+        echo "Preprocessed configs cleaned for ${each.key} - ClickHouse will reload from XML templates"
+      fi
+    EOT
+  }
+  
+  triggers = {
+    storage_type = var.storage_type
+    timestamp    = timestamp()
+  }
+}
+
 # Network
 resource "docker_network" "ch_net" {
   name = "clickhouse-net"
@@ -79,6 +108,13 @@ resource "local_file" "users_xml" {
   })
   filename   = "${var.clickhouse_base_path}/${each.key}/etc/clickhouse-server/users.d/users.xml"
   depends_on = [null_resource.mk_clickhouse_dirs]
+  
+  # Force recreation on every apply to ensure template changes are applied
+  lifecycle {
+    replace_triggered_by = [
+      null_resource.force_config_recreation
+    ]
+  }
 }
 
 resource "local_file" "config_xml" {
@@ -99,6 +135,13 @@ resource "local_file" "config_xml" {
   })
   filename   = "${var.clickhouse_base_path}/${each.key}/etc/clickhouse-server/config.d/config.xml"
   depends_on = [null_resource.mk_clickhouse_dirs]
+  
+  # Force recreation on every apply to ensure template changes are applied
+  lifecycle {
+    replace_triggered_by = [
+      null_resource.force_config_recreation
+    ]
+  }
 }
 
 # S3 Storage configuration (separate file as per ClickHouse docs)
@@ -110,6 +153,29 @@ resource "local_file" "storage_config_xml" {
   })
   filename   = "${var.clickhouse_base_path}/${local.clickhouse_nodes[count.index].name}/etc/clickhouse-server/config.d/storage_config.xml"
   depends_on = [null_resource.mk_clickhouse_dirs]
+  
+  # Force recreation on every apply to ensure template changes are applied
+  lifecycle {
+    replace_triggered_by = [
+      null_resource.force_config_recreation
+    ]
+  }
+}
+
+# Clean storage configs when not using s3_ssd
+resource "null_resource" "cleanup_storage_config" {
+  count = var.storage_type != "s3_ssd" ? length(local.clickhouse_nodes) : 0
+  
+  provisioner "local-exec" {
+    command = "rm -f ${var.clickhouse_base_path}/${local.clickhouse_nodes[count.index].name}/etc/clickhouse-server/config.d/storage_config.xml"
+  }
+  
+  depends_on = [null_resource.mk_clickhouse_dirs]
+  
+  triggers = {
+    storage_type = var.storage_type
+    timestamp    = timestamp()
+  }
 }
 
 # Keeper
@@ -411,6 +477,8 @@ resource "docker_container" "ch_nodes" {
     local_file.config_xml,
     local_file.users_xml,
     local_file.storage_config_xml,
+    null_resource.cleanup_storage_config,
+    null_resource.cleanup_preprocessed_configs,
     null_resource.remote_minio_bucket,
     null_resource.local_storage_minio_bucket,
     null_resource.local_backup_minio_bucket
