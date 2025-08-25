@@ -80,10 +80,14 @@ clickhouse-engineering-course/
 │   │   ├── outputs.tf
 │   │   ├── terraform.tfvars
 │   │   ├── modules/
-│   │   │   └── clickhouse-cluster/  # Модуль кластера ClickHouse
+│   │   │   ├── clickhouse-cluster/  # Модуль кластера ClickHouse
+│   │   │   │   ├── main.tf
+│   │   │   │   ├── variables.tf
+│   │   │   │   ├── outputs.tf
+│   │   │   │   └── samples/
+│   │   │   └── monitoring/          # Модуль мониторинга
 │   │   │       ├── main.tf
 │   │   │       ├── variables.tf
-│   │   │       ├── outputs.tf
 │   │   │       └── samples/
 │   │   ├── env/            # Сгенерированные env файлы
 │   │   └── README.md       # Подробная документация
@@ -189,6 +193,12 @@ unset TF_VAR_super_user_password TF_VAR_bi_user_password
    terraform apply -auto-approve \
      -var="storage_type=s3_ssd" \
      -var="enable_remote_backup=false"
+   ```
+
+   **Режим D: Включение мониторинга**
+   ```bash
+   terraform apply -auto-approve \
+     -var="enable_monitoring=true"
    ```
 
 ### Общие шаги завершения

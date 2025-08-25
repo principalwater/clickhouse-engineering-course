@@ -168,3 +168,35 @@ variable "enable_remote_backup" {
   type        = bool
   default     = false
 }
+
+variable "enable_monitoring" {
+  description = "Включить модуль мониторинга (Prometheus, Grafana, etc.)"
+  type        = bool
+  default     = false
+}
+
+# --- Grafana Admin Configuration ---
+variable "grafana_admin_username" {
+  description = "Имя администратора Grafana (fallback: super_user_name)"
+  type        = string
+  default     = ""
+}
+
+variable "grafana_admin_password" {
+  description = "Пароль администратора Grafana (fallback: super_user_password)"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "grafana_admin_email" {
+  description = "Email администратора Grafana (fallback: super_user_name@monitoring.local)"
+  type        = string
+  default     = ""
+}
+
+variable "clickhouse_hosts" {
+  description = "Список хостов ClickHouse для развертывания и мониторинга"
+  type        = list(string)
+  default     = ["clickhouse-01", "clickhouse-02", "clickhouse-03", "clickhouse-04"]
+}

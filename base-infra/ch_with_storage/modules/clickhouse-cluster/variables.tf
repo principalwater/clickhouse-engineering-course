@@ -153,3 +153,8 @@ variable "enable_remote_backup" {
   type        = bool
   default     = true
 }
+
+variable "clickhouse_hosts" {
+  description = "Список хостов ClickHouse для развертывания."
+  type        = list(string)
+}

@@ -21,6 +21,20 @@ locals {
   bi_user_password_sha256    = sha256(var.bi_user_password)
   cluster_name               = "dwh_test"
 
+  # Project and module labels for container grouping
+  project_name = "clickhouse-engineering-course"
+  module_name  = "clickhouse-cluster"
+
+  # Common labels for all containers
+  common_labels = {
+    "com.docker.compose.project" = local.project_name
+    "com.docker.compose.service" = local.module_name
+    "project.name"               = local.project_name
+    "module.name"                = local.module_name
+    "terraform.workspace"        = terraform.workspace
+    "managed-by"                 = "terraform"
+  }
+
   keeper_nodes = [
     { name = "clickhouse-keeper-01", id = 1, host = "clickhouse-keeper-01", tcp_port = 9181, raft_port = 9234 },
     { name = "clickhouse-keeper-02", id = 2, host = "clickhouse-keeper-02", tcp_port = 9181, raft_port = 9234 },
@@ -35,16 +49,73 @@ locals {
   ]
 
   remote_servers = [
-    { shard = 1, replicas = [{ host = "clickhouse-01", port = var.use_standard_ports ? var.ch_tcp_port : 9000 }, { host = "clickhouse-03", port = var.use_standard_ports ? var.ch_tcp_port : 9002 }] },
-    { shard = 2, replicas = [{ host = "clickhouse-02", port = var.use_standard_ports ? var.ch_tcp_port : 9001 }, { host = "clickhouse-04", port = var.use_standard_ports ? var.ch_tcp_port : 9003 }] },
+    for shard_num in distinct([for node in local.clickhouse_nodes : node.shard]) : {
+      shard = shard_num
+      replicas = [
+        for node in local.clickhouse_nodes : {
+          host = node.host
+          port = node.tcp_port
+        } if node.shard == shard_num
+      ]
+    }
   ]
 }
 
 # --- Resources ---
 
+# Force config recreation trigger
+resource "null_resource" "force_config_recreation" {
+  triggers = {
+    storage_type = var.storage_type
+    timestamp    = timestamp()
+  }
+}
+
+# Clean preprocessed configs to force ClickHouse to reload from templates
+resource "null_resource" "cleanup_preprocessed_configs" {
+  for_each = { for n in local.clickhouse_nodes : n.name => n }
+
+  provisioner "local-exec" {
+    command = <<EOT
+      # Clean preprocessed configs to force recreation from templates
+      if [ -d "${var.clickhouse_base_path}/${each.key}/data/preprocessed_configs" ]; then
+        echo "Cleaning preprocessed configs for ${each.key} to force template reload..."
+        rm -rf ${var.clickhouse_base_path}/${each.key}/data/preprocessed_configs/*
+        echo "Preprocessed configs cleaned for ${each.key} - ClickHouse will reload from XML templates"
+      fi
+    EOT
+  }
+
+  triggers = {
+    storage_type = var.storage_type
+    timestamp    = timestamp()
+  }
+}
+
 # Network
 resource "docker_network" "ch_net" {
-  name = "clickhouse-net"
+  name = "${local.project_name}-network"
+
+  labels {
+    label = "com.docker.compose.project"
+    value = local.project_name
+  }
+  labels {
+    label = "com.docker.compose.service"
+    value = local.module_name
+  }
+  labels {
+    label = "com.docker.compose.network"
+    value = "clickhouse-cluster"
+  }
+  labels {
+    label = "component.type"
+    value = "network"
+  }
+  labels {
+    label = "managed-by"
+    value = "terraform"
+  }
 }
 
 # Images
@@ -79,6 +150,13 @@ resource "local_file" "users_xml" {
   })
   filename   = "${var.clickhouse_base_path}/${each.key}/etc/clickhouse-server/users.d/users.xml"
   depends_on = [null_resource.mk_clickhouse_dirs]
+
+  # Force recreation on every apply to ensure template changes are applied
+  lifecycle {
+    replace_triggered_by = [
+      null_resource.force_config_recreation
+    ]
+  }
 }
 
 resource "local_file" "config_xml" {
@@ -99,6 +177,13 @@ resource "local_file" "config_xml" {
   })
   filename   = "${var.clickhouse_base_path}/${each.key}/etc/clickhouse-server/config.d/config.xml"
   depends_on = [null_resource.mk_clickhouse_dirs]
+
+  # Force recreation on every apply to ensure template changes are applied
+  lifecycle {
+    replace_triggered_by = [
+      null_resource.force_config_recreation
+    ]
+  }
 }
 
 # S3 Storage configuration (separate file as per ClickHouse docs)
@@ -110,6 +195,29 @@ resource "local_file" "storage_config_xml" {
   })
   filename   = "${var.clickhouse_base_path}/${local.clickhouse_nodes[count.index].name}/etc/clickhouse-server/config.d/storage_config.xml"
   depends_on = [null_resource.mk_clickhouse_dirs]
+
+  # Force recreation on every apply to ensure template changes are applied
+  lifecycle {
+    replace_triggered_by = [
+      null_resource.force_config_recreation
+    ]
+  }
+}
+
+# Clean storage configs when not using s3_ssd
+resource "null_resource" "cleanup_storage_config" {
+  count = var.storage_type != "s3_ssd" ? length(local.clickhouse_nodes) : 0
+
+  provisioner "local-exec" {
+    command = "rm -f ${var.clickhouse_base_path}/${local.clickhouse_nodes[count.index].name}/etc/clickhouse-server/config.d/storage_config.xml"
+  }
+
+  depends_on = [null_resource.mk_clickhouse_dirs]
+
+  triggers = {
+    storage_type = var.storage_type
+    timestamp    = timestamp()
+  }
 }
 
 # Keeper
@@ -146,6 +254,31 @@ resource "docker_container" "keeper" {
     aliases = [each.key]
   }
   restart = "unless-stopped"
+
+  labels {
+    label = "com.docker.compose.project"
+    value = local.project_name
+  }
+  labels {
+    label = "com.docker.compose.service"
+    value = each.key
+  }
+  labels {
+    label = "component.type"
+    value = "clickhouse-keeper"
+  }
+  labels {
+    label = "component.node"
+    value = each.key
+  }
+  labels {
+    label = "keeper.id"
+    value = tostring(each.value.id)
+  }
+  labels {
+    label = "managed-by"
+    value = "terraform"
+  }
   mounts {
     target    = "/etc/clickhouse-keeper/keeper_config.xml"
     source    = abspath("${var.clickhouse_base_path}/${each.key}/etc/clickhouse-keeper/keeper_config.xml")
@@ -182,6 +315,27 @@ resource "docker_container" "minio_local" {
   restart = "always"
   networks_advanced {
     name = docker_network.ch_net.name
+  }
+
+  labels {
+    label = "com.docker.compose.project"
+    value = local.project_name
+  }
+  labels {
+    label = "com.docker.compose.service"
+    value = "minio-local-storage"
+  }
+  labels {
+    label = "component.type"
+    value = "minio"
+  }
+  labels {
+    label = "minio.purpose"
+    value = "local-storage"
+  }
+  labels {
+    label = "managed-by"
+    value = "terraform"
   }
   ports {
     internal = 9000
@@ -234,6 +388,27 @@ resource "docker_container" "minio_local_backup" {
   networks_advanced {
     name = docker_network.ch_net.name
   }
+
+  labels {
+    label = "com.docker.compose.project"
+    value = local.project_name
+  }
+  labels {
+    label = "com.docker.compose.service"
+    value = "minio-local-backup"
+  }
+  labels {
+    label = "component.type"
+    value = "minio"
+  }
+  labels {
+    label = "minio.purpose"
+    value = "local-backup"
+  }
+  labels {
+    label = "managed-by"
+    value = "terraform"
+  }
   ports {
     internal = 9000
     external = var.local_minio_port + 10
@@ -276,6 +451,27 @@ resource "docker_container" "minio_remote_backup" {
   name     = "minio-remote-backup"
   image    = docker_image.minio.name
   restart  = "always"
+
+  labels {
+    label = "com.docker.compose.project"
+    value = local.project_name
+  }
+  labels {
+    label = "com.docker.compose.service"
+    value = "minio-remote-backup"
+  }
+  labels {
+    label = "component.type"
+    value = "minio"
+  }
+  labels {
+    label = "minio.purpose"
+    value = "remote-backup"
+  }
+  labels {
+    label = "managed-by"
+    value = "terraform"
+  }
   ports {
     internal = 9000
     external = var.remote_minio_port
@@ -360,6 +556,35 @@ resource "docker_container" "ch_nodes" {
     name    = docker_network.ch_net.name
     aliases = [each.key]
   }
+
+  labels {
+    label = "com.docker.compose.project"
+    value = local.project_name
+  }
+  labels {
+    label = "com.docker.compose.service"
+    value = each.key
+  }
+  labels {
+    label = "component.type"
+    value = "clickhouse-server"
+  }
+  labels {
+    label = "component.node"
+    value = each.key
+  }
+  labels {
+    label = "clickhouse.shard"
+    value = tostring(each.value.shard)
+  }
+  labels {
+    label = "clickhouse.replica"
+    value = tostring(each.value.replica)
+  }
+  labels {
+    label = "managed-by"
+    value = "terraform"
+  }
   dynamic "ports" {
     for_each = each.key == "clickhouse-01" ? [1] : []
     content {
@@ -411,6 +636,8 @@ resource "docker_container" "ch_nodes" {
     local_file.config_xml,
     local_file.users_xml,
     local_file.storage_config_xml,
+    null_resource.cleanup_storage_config,
+    null_resource.cleanup_preprocessed_configs,
     null_resource.remote_minio_bucket,
     null_resource.local_storage_minio_bucket,
     null_resource.local_backup_minio_bucket
@@ -421,11 +648,32 @@ resource "docker_container" "ch_nodes" {
 # Remote backup (to Raspberry Pi)
 resource "docker_container" "clickhouse_backup_remote" {
   count   = var.enable_remote_backup ? 1 : 0
-  name    = "clickhouse-backup"
+  name    = "clickhouse-backup-remote"
   image   = docker_image.clickhouse_backup.name
   command = ["server"] # Run API server to keep container alive
   networks_advanced {
     name = docker_network.ch_net.name
+  }
+
+  labels {
+    label = "com.docker.compose.project"
+    value = local.project_name
+  }
+  labels {
+    label = "com.docker.compose.service"
+    value = "clickhouse-backup-remote"
+  }
+  labels {
+    label = "component.type"
+    value = "clickhouse-backup"
+  }
+  labels {
+    label = "backup.type"
+    value = "remote"
+  }
+  labels {
+    label = "managed-by"
+    value = "terraform"
   }
   mounts {
     target    = "/var/lib/clickhouse"
@@ -459,11 +707,32 @@ resource "docker_container" "clickhouse_backup_remote" {
 # Local backup (to Samsung T7 SSD)
 resource "docker_container" "clickhouse_backup_local" {
   count   = var.storage_type == "local_ssd_backup" ? 1 : 0
-  name    = "clickhouse-backup"
+  name    = "clickhouse-backup-local"
   image   = docker_image.clickhouse_backup.name
   command = ["server"] # Run API server to keep container alive
   networks_advanced {
     name = docker_network.ch_net.name
+  }
+
+  labels {
+    label = "com.docker.compose.project"
+    value = local.project_name
+  }
+  labels {
+    label = "com.docker.compose.service"
+    value = "clickhouse-backup-local"
+  }
+  labels {
+    label = "component.type"
+    value = "clickhouse-backup"
+  }
+  labels {
+    label = "backup.type"
+    value = "local-ssd"
+  }
+  labels {
+    label = "managed-by"
+    value = "terraform"
   }
   mounts {
     target    = "/var/lib/clickhouse"
@@ -497,11 +766,32 @@ resource "docker_container" "clickhouse_backup_local" {
 # S3 backup (to same local MinIO, different bucket)
 resource "docker_container" "clickhouse_backup_s3" {
   count   = var.storage_type == "s3_ssd" && !var.enable_remote_backup ? 1 : 0
-  name    = "clickhouse-backup"
+  name    = "clickhouse-backup-s3"
   image   = docker_image.clickhouse_backup.name
   command = ["server"] # Run API server to keep container alive
   networks_advanced {
     name = docker_network.ch_net.name
+  }
+
+  labels {
+    label = "com.docker.compose.project"
+    value = local.project_name
+  }
+  labels {
+    label = "com.docker.compose.service"
+    value = "clickhouse-backup-s3"
+  }
+  labels {
+    label = "component.type"
+    value = "clickhouse-backup"
+  }
+  labels {
+    label = "backup.type"
+    value = "s3-local"
+  }
+  labels {
+    label = "managed-by"
+    value = "terraform"
   }
   mounts {
     target    = "/var/lib/clickhouse"
