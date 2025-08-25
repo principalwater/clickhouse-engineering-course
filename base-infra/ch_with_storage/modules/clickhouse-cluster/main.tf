@@ -20,11 +20,11 @@ locals {
   super_user_password_sha256 = sha256(var.super_user_password)
   bi_user_password_sha256    = sha256(var.bi_user_password)
   cluster_name               = "dwh_test"
-  
+
   # Project and module labels for container grouping
   project_name = "clickhouse-engineering-course"
   module_name  = "clickhouse-cluster"
-  
+
   # Common labels for all containers
   common_labels = {
     "com.docker.compose.project" = local.project_name
@@ -52,7 +52,7 @@ locals {
 
   remote_servers = [
     for shard_num in distinct([for node in local.clickhouse_nodes : node.shard]) : {
-      shard    = shard_num
+      shard = shard_num
       replicas = [
         for node in local.clickhouse_nodes : {
           host = node.host
@@ -76,7 +76,7 @@ resource "null_resource" "force_config_recreation" {
 # Clean preprocessed configs to force ClickHouse to reload from templates
 resource "null_resource" "cleanup_preprocessed_configs" {
   for_each = { for n in local.clickhouse_nodes : n.name => n }
-  
+
   provisioner "local-exec" {
     command = <<EOT
       # Clean preprocessed configs to force recreation from templates
@@ -87,7 +87,7 @@ resource "null_resource" "cleanup_preprocessed_configs" {
       fi
     EOT
   }
-  
+
   triggers = {
     storage_type = var.storage_type
     timestamp    = timestamp()
@@ -97,7 +97,7 @@ resource "null_resource" "cleanup_preprocessed_configs" {
 # Network
 resource "docker_network" "ch_net" {
   name = "${local.project_name}-network"
-  
+
   labels {
     label = "com.docker.compose.project"
     value = local.project_name
@@ -152,7 +152,7 @@ resource "local_file" "users_xml" {
   })
   filename   = "${var.clickhouse_base_path}/${each.key}/etc/clickhouse-server/users.d/users.xml"
   depends_on = [null_resource.mk_clickhouse_dirs]
-  
+
   # Force recreation on every apply to ensure template changes are applied
   lifecycle {
     replace_triggered_by = [
@@ -179,7 +179,7 @@ resource "local_file" "config_xml" {
   })
   filename   = "${var.clickhouse_base_path}/${each.key}/etc/clickhouse-server/config.d/config.xml"
   depends_on = [null_resource.mk_clickhouse_dirs]
-  
+
   # Force recreation on every apply to ensure template changes are applied
   lifecycle {
     replace_triggered_by = [
@@ -197,7 +197,7 @@ resource "local_file" "storage_config_xml" {
   })
   filename   = "${var.clickhouse_base_path}/${local.clickhouse_nodes[count.index].name}/etc/clickhouse-server/config.d/storage_config.xml"
   depends_on = [null_resource.mk_clickhouse_dirs]
-  
+
   # Force recreation on every apply to ensure template changes are applied
   lifecycle {
     replace_triggered_by = [
@@ -209,13 +209,13 @@ resource "local_file" "storage_config_xml" {
 # Clean storage configs when not using s3_ssd
 resource "null_resource" "cleanup_storage_config" {
   count = var.storage_type != "s3_ssd" ? length(local.clickhouse_nodes) : 0
-  
+
   provisioner "local-exec" {
     command = "rm -f ${var.clickhouse_base_path}/${local.clickhouse_nodes[count.index].name}/etc/clickhouse-server/config.d/storage_config.xml"
   }
-  
+
   depends_on = [null_resource.mk_clickhouse_dirs]
-  
+
   triggers = {
     storage_type = var.storage_type
     timestamp    = timestamp()
@@ -256,7 +256,7 @@ resource "docker_container" "keeper" {
     aliases = [each.key]
   }
   restart = "unless-stopped"
-  
+
   labels {
     label = "com.docker.compose.project"
     value = local.project_name
@@ -318,7 +318,7 @@ resource "docker_container" "minio_local" {
   networks_advanced {
     name = docker_network.ch_net.name
   }
-  
+
   labels {
     label = "com.docker.compose.project"
     value = local.project_name
@@ -390,7 +390,7 @@ resource "docker_container" "minio_local_backup" {
   networks_advanced {
     name = docker_network.ch_net.name
   }
-  
+
   labels {
     label = "com.docker.compose.project"
     value = local.project_name
@@ -453,7 +453,7 @@ resource "docker_container" "minio_remote_backup" {
   name     = "minio-remote-backup"
   image    = docker_image.minio.name
   restart  = "always"
-  
+
   labels {
     label = "com.docker.compose.project"
     value = local.project_name
@@ -558,7 +558,7 @@ resource "docker_container" "ch_nodes" {
     name    = docker_network.ch_net.name
     aliases = [each.key]
   }
-  
+
   labels {
     label = "com.docker.compose.project"
     value = local.project_name
@@ -656,7 +656,7 @@ resource "docker_container" "clickhouse_backup_remote" {
   networks_advanced {
     name = docker_network.ch_net.name
   }
-  
+
   labels {
     label = "com.docker.compose.project"
     value = local.project_name
@@ -715,7 +715,7 @@ resource "docker_container" "clickhouse_backup_local" {
   networks_advanced {
     name = docker_network.ch_net.name
   }
-  
+
   labels {
     label = "com.docker.compose.project"
     value = local.project_name
@@ -774,7 +774,7 @@ resource "docker_container" "clickhouse_backup_s3" {
   networks_advanced {
     name = docker_network.ch_net.name
   }
-  
+
   labels {
     label = "com.docker.compose.project"
     value = local.project_name

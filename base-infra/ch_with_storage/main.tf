@@ -142,12 +142,12 @@ module "monitoring" {
   clickhouse_uri          = "http://${module.clickhouse_cluster.clickhouse_nodes[0].name}:${module.clickhouse_cluster.clickhouse_nodes[0].http_port}"
   clickhouse_user         = var.super_user_name
   clickhouse_password     = var.super_user_password
-  
+
   # Grafana admin configuration with fallback to super_user credentials
-  grafana_admin_username  = var.grafana_admin_username != "" ? var.grafana_admin_username : var.super_user_name
-  grafana_admin_password  = var.grafana_admin_password != "" ? var.grafana_admin_password : var.super_user_password
-  grafana_admin_email     = var.grafana_admin_email != "" ? var.grafana_admin_email : "${var.super_user_name}@monitoring.local"
-  
+  grafana_admin_username = var.grafana_admin_username != "" ? var.grafana_admin_username : var.super_user_name
+  grafana_admin_password = var.grafana_admin_password != "" ? var.grafana_admin_password : var.super_user_password
+  grafana_admin_email    = var.grafana_admin_email != "" ? var.grafana_admin_email : "${var.super_user_name}@monitoring.local"
+
   # Create additional users only, admin is handled by container env vars
   grafana_local_users = [
     {
@@ -159,6 +159,6 @@ module "monitoring" {
       role       = "Editor"
     }
   ]
-  clickhouse_hosts        = [for node in module.clickhouse_cluster.clickhouse_nodes : "${node.name}:${node.http_port}"]
-  clickhouse_base_path    = var.clickhouse_base_path
+  clickhouse_hosts     = [for node in module.clickhouse_cluster.clickhouse_nodes : "${node.name}:${node.http_port}"]
+  clickhouse_base_path = var.clickhouse_base_path
 }

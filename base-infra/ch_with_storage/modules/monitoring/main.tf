@@ -20,17 +20,17 @@ locals {
     "module.name"                = "monitoring"
     "managed-by"                 = "terraform"
   }
-  
+
   # Coalesce admin credentials with super_user fallback
-  grafana_admin_user     = coalesce(var.grafana_admin_username, var.super_user_name, "admin")
-  grafana_admin_pwd      = coalesce(var.grafana_admin_password, var.super_user_password)
-  grafana_admin_mail     = var.grafana_admin_email
+  grafana_admin_user = coalesce(var.grafana_admin_username, var.super_user_name, "admin")
+  grafana_admin_pwd  = coalesce(var.grafana_admin_password, var.super_user_password)
+  grafana_admin_mail = var.grafana_admin_email
 }
 
 # --- Monitoring Network ---
 resource "docker_network" "monitoring" {
   name = "${var.project_name}-monitoring-network"
-  
+
   labels {
     label = "com.docker.compose.project"
     value = var.project_name
@@ -71,7 +71,7 @@ resource "local_file" "prometheus_config" {
     clickhouse_hosts = var.clickhouse_hosts
   })
   filename = "${path.module}/generated/prometheus.yml"
-  
+
   # Create directory if it doesn't exist
   provisioner "local-exec" {
     command = "mkdir -p ${path.module}/generated"
@@ -87,9 +87,9 @@ resource "null_resource" "force_prometheus_config_recreation" {
 
 resource "local_file" "clickhouse_prometheus_config" {
   for_each = toset(var.clickhouse_hosts)
-  content = templatefile("${path.module}/samples/prometheus.xml.tpl", {})
+  content  = templatefile("${path.module}/samples/prometheus.xml.tpl", {})
   filename = "${var.clickhouse_base_path}/${split(":", each.value)[0]}/etc/clickhouse-server/config.d/prometheus.xml"
-  
+
   # Force recreation on every apply to ensure template changes are applied
   lifecycle {
     replace_triggered_by = [null_resource.force_prometheus_config_recreation]
@@ -99,7 +99,7 @@ resource "local_file" "clickhouse_prometheus_config" {
 # Cleanup old Prometheus configs on destroy
 resource "null_resource" "cleanup_prometheus_config" {
   for_each = toset(var.clickhouse_hosts)
-  
+
   triggers = {
     host_name = split(":", each.value)[0]
     base_path = var.clickhouse_base_path
@@ -115,29 +115,29 @@ resource "null_resource" "cleanup_prometheus_config" {
 resource "docker_container" "prometheus" {
   name  = "prometheus-monitoring"
   image = docker_image.prometheus.name
-  init = true
-  
+  init  = true
+
   networks_advanced {
-    name = docker_network.monitoring.name
+    name    = docker_network.monitoring.name
     aliases = ["prometheus"]
   }
-  
+
   networks_advanced {
     name = var.clickhouse_network_name
   }
-  
+
   ports {
     internal = 9090
     external = var.prometheus_port
   }
-  
+
   mounts {
-    target = "/etc/prometheus/prometheus.yml"
-    source = abspath(local_file.prometheus_config.filename)
-    type   = "bind"
+    target    = "/etc/prometheus/prometheus.yml"
+    source    = abspath(local_file.prometheus_config.filename)
+    type      = "bind"
     read_only = true
   }
-  
+
   # Additional Prometheus configuration
   command = [
     "--config.file=/etc/prometheus/prometheus.yml",
@@ -147,7 +147,7 @@ resource "docker_container" "prometheus" {
     "--storage.tsdb.retention.time=15d",
     "--web.enable-lifecycle"
   ]
-  
+
   labels {
     label = "com.docker.compose.project"
     value = var.project_name
@@ -164,7 +164,7 @@ resource "docker_container" "prometheus" {
     label = "managed-by"
     value = "terraform"
   }
-  
+
   depends_on = [local_file.prometheus_config]
 }
 
@@ -172,18 +172,18 @@ resource "docker_container" "prometheus" {
 resource "docker_container" "grafana" {
   name  = "grafana-monitoring"
   image = docker_image.grafana.name
-  init = true
-  
+  init  = true
+
   networks_advanced {
-    name = docker_network.monitoring.name
+    name    = docker_network.monitoring.name
     aliases = ["grafana"]
   }
-  
+
   ports {
     internal = 3000
     external = var.grafana_port
   }
-  
+
   env = [
     "GF_SECURITY_ADMIN_USER=${local.grafana_admin_user}",
     "GF_SECURITY_ADMIN_PASSWORD=${local.grafana_admin_pwd}",
@@ -193,13 +193,13 @@ resource "docker_container" "grafana" {
     "GF_SECURITY_COOKIE_SAMESITE=none",
     "GF_INSTALL_PLUGINS=grafana-clickhouse-datasource"
   ]
-  
+
   # Grafana storage
   volumes {
     volume_name    = "grafana-storage"
     container_path = "/var/lib/grafana"
   }
-  
+
   labels {
     label = "com.docker.compose.project"
     value = var.project_name
@@ -222,34 +222,34 @@ resource "docker_container" "grafana" {
 resource "docker_container" "clickhouse_exporter" {
   name  = "clickhouse-exporter"
   image = docker_image.clickhouse_exporter.name
-  init = true
-  
+  init  = true
+
   networks_advanced {
-    name = docker_network.monitoring.name
+    name    = docker_network.monitoring.name
     aliases = ["clickhouse-exporter"]
   }
-  
+
   networks_advanced {
     name = var.clickhouse_network_name
   }
-  
+
   ports {
     internal = 9116
     external = var.clickhouse_exporter_port
   }
-  
+
   env = [
     "CLICKHOUSE_USER=${var.clickhouse_user}",
     "CLICKHOUSE_PASSWORD=${var.clickhouse_password}",
     "CLICKHOUSE_DATABASE=default"
   ]
-  
+
   # Configure exporter to use correct ClickHouse URI
   command = [
     "-scrape_uri", "${var.clickhouse_uri}",
     "-telemetry.address", ":9116"
   ]
-  
+
   labels {
     label = "com.docker.compose.project"
     value = var.project_name
@@ -271,7 +271,7 @@ resource "docker_container" "clickhouse_exporter" {
 # --- Grafana Volume ---
 resource "docker_volume" "grafana_storage" {
   name = "grafana-storage"
-  
+
   labels {
     label = "com.docker.compose.project"
     value = var.project_name
@@ -300,7 +300,7 @@ resource "null_resource" "wait_for_prometheus" {
       done
     EOT
   }
-  
+
   depends_on = [docker_container.prometheus]
 }
 
@@ -317,14 +317,14 @@ resource "null_resource" "wait_for_grafana" {
       done
     EOT
   }
-  
+
   depends_on = [docker_container.grafana]
 }
 
 # --- Grafana Admin User Setup ---
 resource "null_resource" "grafana_admin_setup" {
   provisioner "local-exec" {
-    command = <<EOT
+    command     = <<EOT
 set -e
 
 GRAFANA_URL="http://localhost:${var.grafana_port}"
@@ -364,16 +364,16 @@ echo "Admin user setup completed"
 EOT
     interpreter = ["/bin/bash", "-c"]
   }
-  
+
   depends_on = [null_resource.wait_for_grafana]
 }
 
 # --- Grafana Additional Users Creation ---
 resource "null_resource" "grafana_create_users" {
   count = length(var.grafana_local_users) > 0 ? 1 : 0
-  
+
   provisioner "local-exec" {
-    command = <<EOT
+    command     = <<EOT
 set -e
 
 GRAFANA_URL="http://localhost:${var.grafana_port}"
@@ -462,6 +462,6 @@ echo "All users created successfully"
 EOT
     interpreter = ["/bin/bash", "-c"]
   }
-  
+
   depends_on = [null_resource.grafana_admin_setup]
 }
