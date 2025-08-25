@@ -46,11 +46,20 @@ locals {
     { name = "clickhouse-02", shard = 2, replica = 1, host = "clickhouse-02", http_port = var.use_standard_ports ? var.ch_http_port : 8124, tcp_port = var.use_standard_ports ? var.ch_tcp_port : 9001 },
     { name = "clickhouse-03", shard = 1, replica = 2, host = "clickhouse-03", http_port = var.use_standard_ports ? var.ch_http_port : 8125, tcp_port = var.use_standard_ports ? var.ch_tcp_port : 9002 },
     { name = "clickhouse-04", shard = 2, replica = 2, host = "clickhouse-04", http_port = var.use_standard_ports ? var.ch_http_port : 8126, tcp_port = var.use_standard_ports ? var.ch_tcp_port : 9003 },
+    { name = "clickhouse-05", shard = 1, replica = 3, host = "clickhouse-05", http_port = var.use_standard_ports ? var.ch_http_port : 8127, tcp_port = var.use_standard_ports ? var.ch_tcp_port : 9004 },
+    { name = "clickhouse-06", shard = 2, replica = 3, host = "clickhouse-06", http_port = var.use_standard_ports ? var.ch_http_port : 8128, tcp_port = var.use_standard_ports ? var.ch_tcp_port : 9005 },
   ]
 
   remote_servers = [
-    { shard = 1, replicas = [{ host = "clickhouse-01", port = var.use_standard_ports ? var.ch_tcp_port : 9000 }, { host = "clickhouse-03", port = var.use_standard_ports ? var.ch_tcp_port : 9002 }] },
-    { shard = 2, replicas = [{ host = "clickhouse-02", port = var.use_standard_ports ? var.ch_tcp_port : 9001 }, { host = "clickhouse-04", port = var.use_standard_ports ? var.ch_tcp_port : 9003 }] },
+    for shard_num in distinct([for node in local.clickhouse_nodes : node.shard]) : {
+      shard    = shard_num
+      replicas = [
+        for node in local.clickhouse_nodes : {
+          host = node.host
+          port = node.tcp_port
+        } if node.shard == shard_num
+      ]
+    }
   ]
 }
 

@@ -104,6 +104,9 @@ module "clickhouse_cluster" {
   bucket_backup  = var.bucket_backup
   bucket_storage = var.bucket_storage
 
+  # Hosts
+  clickhouse_hosts = var.clickhouse_hosts
+
   # Feature flags
   enable_remote_backup = var.enable_remote_backup
 }
@@ -126,4 +129,36 @@ MINIO_PASSWORD=${var.minio_root_password}
 EOT
   filename   = "${path.root}/env/clickhouse.env"
   depends_on = [null_resource.mk_env_dir]
+}
+
+
+# --- Monitoring Module ---
+module "monitoring" {
+  source = "./modules/monitoring"
+  count  = var.enable_monitoring ? 1 : 0
+
+  clickhouse_network_name = module.clickhouse_cluster.network_name
+  clickhouse_network_id   = module.clickhouse_cluster.network_id
+  clickhouse_uri          = "http://${module.clickhouse_cluster.clickhouse_nodes[0].name}:${module.clickhouse_cluster.clickhouse_nodes[0].http_port}"
+  clickhouse_user         = var.super_user_name
+  clickhouse_password     = var.super_user_password
+  
+  # Grafana admin configuration with fallback to super_user credentials
+  grafana_admin_username  = var.grafana_admin_username != "" ? var.grafana_admin_username : var.super_user_name
+  grafana_admin_password  = var.grafana_admin_password != "" ? var.grafana_admin_password : var.super_user_password
+  grafana_admin_email     = var.grafana_admin_email != "" ? var.grafana_admin_email : "${var.super_user_name}@monitoring.local"
+  
+  # Create additional users only, admin is handled by container env vars
+  grafana_local_users = [
+    {
+      username   = "analytics"
+      password   = var.grafana_admin_password != "" ? var.grafana_admin_password : var.super_user_password
+      first_name = "Analytics"
+      last_name  = "User"
+      email      = "analytics@monitoring.local"
+      role       = "Editor"
+    }
+  ]
+  clickhouse_hosts        = [for node in module.clickhouse_cluster.clickhouse_nodes : "${node.name}:${node.http_port}"]
+  clickhouse_base_path    = var.clickhouse_base_path
 }

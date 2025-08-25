@@ -37,3 +37,13 @@ output "bucket_storage" {
   description = "Имя бакета для storage (если используется s3_ssd)"
   value       = var.storage_type == "s3_ssd" ? var.bucket_storage : null
 }
+
+output "network_name" {
+  description = "Имя сети Docker"
+  value       = docker_network.ch_net.name
+}
+
+output "network_id" {
+  description = "ID сети Docker"
+  value       = docker_network.ch_net.id
+}
