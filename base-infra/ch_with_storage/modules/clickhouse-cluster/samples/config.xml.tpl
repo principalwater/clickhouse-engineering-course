@@ -51,6 +51,7 @@
   <${cluster_name}>
 %{ for shard in remote_servers ~}
     <shard>
+      <internal_replication>true</internal_replication>
     %{ for replica in shard.replicas ~}
       <replica>
         <host>${replica.host}</host>
