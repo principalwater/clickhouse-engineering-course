@@ -200,3 +200,143 @@ variable "clickhouse_hosts" {
   type        = list(string)
   default     = ["clickhouse-01", "clickhouse-02", "clickhouse-03", "clickhouse-04"]
 }
+
+# --- Airflow Configuration ---
+variable "enable_airflow" {
+  description = "Включить модуль Airflow для ETL процессов"
+  type        = bool
+  default     = false
+}
+
+variable "airflow_version" {
+  description = "Версия Docker-образа Apache Airflow"
+  type        = string
+  default     = "3.0.4"
+}
+
+variable "airflow_admin_user" {
+  description = "Имя администратора Airflow"
+  type        = string
+  default     = "admin"
+}
+
+variable "airflow_admin_password" {
+  description = "Пароль администратора Airflow"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "airflow_fernet_key" {
+  description = "Fernet key для шифрования в Airflow (32-байтовый base64-encoded ключ)"
+  type        = string
+  sensitive   = true
+  default     = ""
+  validation {
+    condition     = length(var.airflow_fernet_key) == 44 || var.airflow_fernet_key == ""
+    error_message = "Airflow fernet key должен быть 44-символьной base64-encoded строкой или пустым для использования значения по умолчанию."
+  }
+}
+
+variable "airflow_webserver_secret_key" {
+  description = "Secret key для веб-сервера Airflow (32-байтовый base64-encoded ключ)"
+  type        = string
+  sensitive   = true
+  default     = ""
+  validation {
+    condition     = length(var.airflow_webserver_secret_key) == 44 || var.airflow_webserver_secret_key == ""
+    error_message = "Airflow webserver secret key должен быть 44-символьной base64-encoded строкой или пустым для использования значения по умолчанию."
+  }
+}
+
+variable "airflow_jwt_signing_key" {
+  description = "Secret key for Airflow API JWT tokens"
+  type        = string
+  sensitive   = true
+}
+
+# --- PostgreSQL Configuration ---
+variable "postgres_version" {
+  description = "Версия PostgreSQL для метабазы BI инструментов"
+  type        = string
+  default     = "16-alpine"
+}
+
+variable "postgres_data_path" {
+  description = "Путь к директории с данными PostgreSQL"
+  type        = string
+  default     = "../../volumes/postgres/data"
+}
+
+# Airflow PostgreSQL настройки
+variable "airflow_pg_user" {
+  description = "Имя пользователя PostgreSQL для Airflow"
+  type        = string
+  default     = "airflow"
+}
+
+variable "airflow_pg_password" {
+  description = "Пароль пользователя PostgreSQL для Airflow (fallback к super_user_password)"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "airflow_pg_db" {
+  description = "Имя базы данных PostgreSQL для Airflow"
+  type        = string
+  default     = "airflow"
+}
+
+# --- Flags для будущих расширений ---
+variable "enable_metabase" {
+  description = "Включить модуль Metabase (для будущих homework)"
+  type        = bool
+  default     = false
+}
+
+variable "enable_superset" {
+  description = "Включить модуль Superset (для будущих homework)"
+  type        = bool
+  default     = false
+}
+
+# Metabase PostgreSQL настройки (для будущего использования)
+variable "metabase_pg_user" {
+  description = "Имя пользователя PostgreSQL для Metabase"
+  type        = string
+  default     = "metabase"
+}
+
+variable "metabase_pg_password" {
+  description = "Пароль пользователя PostgreSQL для Metabase (fallback к super_user_password)"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "metabase_pg_db" {
+  description = "Имя базы данных PostgreSQL для Metabase"
+  type        = string
+  default     = "metabase"
+}
+
+# Superset PostgreSQL настройки (для будущего использования)
+variable "superset_pg_user" {
+  description = "Имя пользователя PostgreSQL для Superset"
+  type        = string
+  default     = "superset"
+}
+
+variable "superset_pg_password" {
+  description = "Пароль пользователя PostgreSQL для Superset (fallback к super_user_password)"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "superset_pg_db" {
+  description = "Имя базы данных PostgreSQL для Superset"
+  type        = string
+  default     = "superset"
+}

@@ -1,0 +1,57 @@
+# ClickHouse Configuration
+super_user_name     = "su"
+super_user_password = "your_secure_password_here"
+bi_user_name        = "bi_user"
+bi_user_password    = "your_bi_password_here"
+
+# MinIO Configuration
+minio_root_user     = "minioadmin"
+minio_root_password = "your_minio_password_here"
+
+# Storage Type: "local_ssd" or "s3_ssd" or "remote_backup"
+storage_type = "local_ssd"
+
+# Remote Configuration (only for remote storage)
+# remote_host_name     = "your-remote-host.com"
+# remote_ssh_user      = "your_ssh_user"
+# ssh_private_key_path = "~/.ssh/your_private_key"
+
+# Monitoring (optional)
+enable_monitoring = false
+# grafana_admin_username = "admin"
+# grafana_admin_password = "your_grafana_password_here"
+# grafana_admin_email    = "admin@company.com"
+
+# Airflow Configuration (optional)
+enable_airflow = false
+airflow_admin_user     = "admin"
+airflow_admin_password = "your_airflow_password_here"
+
+# Ключи шифрования для Airflow (ОБЯЗАТЕЛЬНО при enable_airflow = true!)
+# Для airflow_fernet_key выполните: python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+airflow_fernet_key           = ""
+# Для airflow_webserver_secret_key выполните: openssl rand -base64 32
+airflow_webserver_secret_key = ""
+
+# PostgreSQL Configuration (для Airflow и будущих BI инструментов)
+postgres_version = "16-alpine"
+postgres_data_path = "../../volumes/postgres/data"
+
+# Airflow PostgreSQL настройки
+airflow_pg_user = "airflow"
+airflow_pg_password = ""  # fallback к super_user_password
+airflow_pg_db = "airflow"
+
+# Будущие расширения (для следующих homework)
+enable_metabase = false
+enable_superset = false
+
+# Metabase PostgreSQL настройки (для будущего использования)
+metabase_pg_user = "metabase"
+metabase_pg_password = ""  # fallback к super_user_password
+metabase_pg_db = "metabase"
+
+# Superset PostgreSQL настройки (для будущего использования)
+superset_pg_user = "superset"
+superset_pg_password = ""  # fallback к super_user_password
+superset_pg_db = "superset"

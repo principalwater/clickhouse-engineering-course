@@ -36,6 +36,7 @@
 13) [Storage Policy и резервное копирование](./hw13_storage-policy-backup)
 14) [Мониторинг, метрики и логирование](./hw14_monitoring-metrics-logging)
 15) [Профилирование запросов](./hw15_query-profiling)
+16) [Загрузка данных в ClickHouse](./hw16_data-loading)
 
 **Дополнительно:**
 - [Инфраструктурные модули и сценарии автоматизации (Terraform, Docker, ClickHouse)](./base-infra)
@@ -109,6 +110,7 @@ This repository is equipped with a production-ready CI/CD pipeline powered by Gi
 13) [Storage Policy and Backup](./hw13_storage-policy-backup)
 14) [Monitoring, Metrics, and Logging](./hw14_monitoring-metrics-logging)
 15) [Query Profiling](./hw15_query-profiling)
+16) [Data Loading to ClickHouse](./hw16_data-loading)
 
 **Additionally:**
 - [Infrastructure modules and automation scripts (Terraform, Docker, ClickHouse)](./base-infra)
