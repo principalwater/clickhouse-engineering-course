@@ -129,7 +129,7 @@ locals {
     "AIRFLOW__SCHEDULER__SCHEDULER_HEALTH_CHECK_SERVER_PORT=8974",
     "AIRFLOW__SCHEDULER__SCHEDULER_HEALTH_CHECK_THRESHOLD=60",
     "AIRFLOW__CORE__STANDALONE_DAG_PROCESSOR=true",
-    "AIRFLOW__CELERY__WORKER_CONCURRENCY=1",
+    "AIRFLOW__CELERY__WORKER_CONCURRENCY=16",
     "AIRFLOW__CELERY__WORKER_ENABLE_REMOTE_CONTROL=false",
     "_PIP_ADDITIONAL_REQUIREMENTS=clickhouse-connect>=0.7.0 python-dotenv>=1.0.0 requests>=2.31.0 kafka-python>=2.0.2 apache-airflow-providers-dbt-cloud>=1.0.0 dbt-core==1.10.7 dbt-clickhouse==1.9.2 psutil>=5.9.0 docker>=6.0.0 apache-airflow-providers-telegram==4.8.2",
     "AIRFLOW_CONFIG=/opt/airflow/config/airflow.cfg",

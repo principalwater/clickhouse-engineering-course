@@ -54,6 +54,10 @@ jobs:
       AIRFLOW_WEBSERVER_SECRET_KEY: ${{ secrets.AIRFLOW_WEBSERVER_SECRET_KEY }}
       AIRFLOW_JWT_SIGNING_KEY: ${{ secrets.AIRFLOW_JWT_SIGNING_KEY }}
       AIRFLOW_PG_PASSWORD: ${{ secrets.AIRFLOW_PG_PASSWORD }}
+
+      # Kafka Secrets
+      KAFKA_ADMIN_PASSWORD: ${{ secrets.KAFKA_ADMIN_PASSWORD }}
+      KAFKA_SSL_KEYSTORE_PASSWORD: ${{ secrets.KAFKA_SSL_KEYSTORE_PASSWORD }}
       
       # Set storage_type for CI context
       storage_type: local_ssd
