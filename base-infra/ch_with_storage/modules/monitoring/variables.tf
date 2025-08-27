@@ -6,7 +6,7 @@
 variable "project_name" {
   description = "Name of the project for labeling resources"
   type        = string
-  default     = "clickhouse-monitoring"
+  default     = "clickhouse-engineering-course"
 }
 
 variable "clickhouse_network_name" {

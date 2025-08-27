@@ -1,4 +1,10 @@
-# --- MacOS system files ---
+# --- IDE and Editor files ---
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# --- OS Specific (MacOS, etc.) ---
 .DS_Store
 .AppleDouble
 .LSOverride
@@ -11,40 +17,12 @@ Icon
 .DocumentRevisions-V100
 .com.apple.timemachine.donotpresent
 
-# --- IDE and Editor files ---
-.idea/
-.vscode/
-*.swp
-*.swo
-
-# --- Python Virtualenv & Pycache ---
-env/
-*.env
-venv/
-.venv/
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-
-# --- Data, Volumes, and Uploads ---
-volumes/
-volumes/*
-data/
-data/*
-uploads/
-uploads/*
-additional/clickhouse/**/*.csv
-
-# Игнорировать любые .py-файлы с конфигами/секретами в additional/bi-infra на любом уровне
-additional/bi-infra/**/superset_config.py
-additional/bi-infra/**/*config.py
-additional/bi-infra/**/*secret.py
-
 # --- Terraform ---
 **/.terraform/
+.terraform.lock.hcl
 *.tfstate
 *.tfstate.*
+*.tfplan
 crash.log
 *.tfvars
 override.tf
@@ -53,8 +31,42 @@ override.tf.json
 *_override.tf.json
 .terraform*
 
+# --- Python Virtualenv & Pycache ---
+env/
+venv/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+
+# --- Data, Volumes, and Uploads ---
+volumes/
+data/
+uploads/
+additional/clickhouse/**/*.csv
+
+# --- Secrets and Environment variables ---
+secrets/
+*.env
+*.env.*
+!*.env.example
+/infra/env/
+
+# --- Project-specific ignores ---
+airflow.cfg
+additional/bi-infra/**/superset_config.py
+additional/bi-infra/**/*config.py
+additional/bi-infra/**/*secret.py
+
 # --- Logs and Miscellaneous ---
 *.log
 *.bak
 *.tmp
 *.temp
+*.pid
+*.old
+base-infra/ch_with_storage/logs/
