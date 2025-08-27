@@ -28,9 +28,10 @@ airflow_admin_user     = "admin"
 airflow_admin_password = "your_airflow_password_here"
 
 # Ключи шифрования для Airflow (ОБЯЗАТЕЛЬНО при enable_airflow = true!)
-# Сгенерируйте командой: python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-airflow_fernet_key           = "your_44_char_base64_fernet_key_here="
-airflow_webserver_secret_key = "your_44_char_base64_webserver_key_here="
+# Для airflow_fernet_key выполните: python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+airflow_fernet_key           = ""
+# Для airflow_webserver_secret_key выполните: openssl rand -base64 32
+airflow_webserver_secret_key = ""
 
 # PostgreSQL Configuration (для Airflow и будущих BI инструментов)
 postgres_version = "16-alpine"

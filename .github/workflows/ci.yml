@@ -48,6 +48,13 @@ jobs:
       SUPERSET_SECRET_KEY: ${{ secrets.SUPERSET_SECRET_KEY }}
       SUPER_USER_PASSWORD: ${{ secrets.SUPER_USER_PASSWORD }}
       
+      # Airflow secrets
+      AIRFLOW_ADMIN_PASSWORD: ${{ secrets.AIRFLOW_ADMIN_PASSWORD }}
+      AIRFLOW_FERNET_KEY: ${{ secrets.AIRFLOW_FERNET_KEY }}
+      AIRFLOW_WEBSERVER_SECRET_KEY: ${{ secrets.AIRFLOW_WEBSERVER_SECRET_KEY }}
+      AIRFLOW_JWT_SIGNING_KEY: ${{ secrets.AIRFLOW_JWT_SIGNING_KEY }}
+      AIRFLOW_PG_PASSWORD: ${{ secrets.AIRFLOW_PG_PASSWORD }}
+      
       # Set storage_type for CI context
       storage_type: local_ssd
     steps:
