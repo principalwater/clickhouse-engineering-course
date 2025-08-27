@@ -62,6 +62,16 @@ additional/bi-infra/**/superset_config.py
 additional/bi-infra/**/*config.py
 additional/bi-infra/**/*secret.py
 
+# --- Kafka-specific ---
+kafka-secrets/
+kafka-logs/
+**/kafka/data/
+**/kafka/logs/
+**/zookeeper/data/
+**/zookeeper/logs/
+*.jks
+*.p12
+
 # --- Logs and Miscellaneous ---
 *.log
 *.bak

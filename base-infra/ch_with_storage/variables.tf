@@ -340,3 +340,60 @@ variable "superset_pg_db" {
   type        = string
   default     = "superset"
 }
+
+# --- Kafka Configuration ---
+variable "enable_kafka" {
+  description = "Включить модуль Kafka для интеграции с ClickHouse"
+  type        = bool
+  default     = false
+}
+
+variable "kafka_version" {
+  description = "Версия для Docker-образов Confluent Platform (Kafka, Zookeeper)."
+  type        = string
+  default     = "7.5.0"
+}
+
+variable "topic_1min" {
+  description = "Название топика для 1-минутных данных."
+  type        = string
+  default     = "covid_new_cases_1min"
+}
+
+variable "topic_5min" {
+  description = "Название топика для 5-минутных данных."
+  type        = string
+  default     = "covid_cumulative_data_5min"
+}
+
+variable "kafka_admin_user" {
+  description = "Имя пользователя-администратора для Kafka."
+  type        = string
+  default     = "kafka_admin"
+}
+
+variable "kafka_admin_password" {
+  description = "Пароль для пользователя-администратора Kafka."
+  type        = string
+  sensitive   = true
+}
+
+variable "kafka_ssl_keystore_password" {
+  description = "Пароль для Keystore и Truststore Kafka."
+  type        = string
+  sensitive   = true
+}
+
+variable "secrets_path" {
+  description = "Абсолютный путь к директории с секретами для Kafka."
+  type        = string
+  default     = "../../secrets"
+}
+
+variable "enable_kafka_acl" {
+  description = "Включить ACL авторизацию в Kafka"
+  type        = bool
+  default     = false
+}
+
+

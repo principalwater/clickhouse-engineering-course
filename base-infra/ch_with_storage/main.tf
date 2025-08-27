@@ -153,12 +153,34 @@ resource "null_resource" "mk_env_dir" {
 
 resource "local_file" "env_file" {
   content    = <<EOT
+# ClickHouse Configuration
+CLICKHOUSE_HOST=localhost
+CLICKHOUSE_PORT=8123
 CH_USER=${var.super_user_name}
 CH_PASSWORD=${var.super_user_password}
 BI_USER=${var.bi_user_name}
 BI_PASSWORD=${var.bi_user_password}
+
+# MinIO Configuration
 MINIO_USER=${var.minio_root_user}
 MINIO_PASSWORD=${var.minio_root_password}
+
+# Airflow Configuration
+AIRFLOW_ADMIN_USER=${var.airflow_admin_user}
+AIRFLOW_ADMIN_PASSWORD=${var.airflow_admin_password}
+
+# Kafka Configuration
+KAFKA_BROKER=kafka:9092
+KAFKA_ADMIN_USER=${var.kafka_admin_user}
+KAFKA_ADMIN_PASSWORD=${var.kafka_admin_password}
+KAFKA_SSL_KEYSTORE_PASSWORD=${var.kafka_ssl_keystore_password}
+KAFKA_TOPIC_1MIN=${var.topic_1min}
+KAFKA_TOPIC_5MIN=${var.topic_5min}
+
+# PostgreSQL Configuration  
+POSTGRES_USER=${var.airflow_pg_user}
+POSTGRES_PASSWORD=${var.airflow_pg_password != "" ? var.airflow_pg_password : var.super_user_password}
+POSTGRES_DB=${var.airflow_pg_db}
 EOT
   filename   = "${path.root}/env/clickhouse.env"
   depends_on = [null_resource.mk_env_dir]
@@ -195,6 +217,23 @@ module "monitoring" {
   clickhouse_hosts     = [for node in module.clickhouse_cluster.clickhouse_nodes : "${node.name}:${node.http_port}"]
   clickhouse_base_path = var.clickhouse_base_path
 }
+
+# --- Kafka Module ---
+module "kafka" {
+  source = "./modules/kafka"
+  count  = var.enable_kafka ? 1 : 0
+
+  kafka_version               = var.kafka_version
+  docker_network_name         = module.clickhouse_cluster.network_name
+  kafka_admin_user            = var.kafka_admin_user
+  kafka_admin_password        = var.kafka_admin_password
+  kafka_ssl_keystore_password = var.kafka_ssl_keystore_password
+  secrets_path                = abspath("${path.root}/${var.secrets_path}")
+  enable_kafka_acl            = false
+
+  depends_on = [module.clickhouse_cluster]
+}
+
 
 # --- Airflow Module ---
 module "airflow" {
@@ -233,9 +272,9 @@ module "airflow" {
   airflow_jwt_signing_key      = var.airflow_jwt_signing_key
 
   # Kafka настройки (опциональные)
-  kafka_network_name = ""
-  kafka_topic_1min   = "kafka_topic_1min"
-  kafka_topic_5min   = "kafka_topic_5min"
+  kafka_network_name = var.enable_kafka ? module.kafka[0].network_name : ""
+  kafka_topic_1min   = var.topic_1min
+  kafka_topic_5min   = var.topic_5min
 
   # Дополнительные настройки
   airflow_version        = var.airflow_version

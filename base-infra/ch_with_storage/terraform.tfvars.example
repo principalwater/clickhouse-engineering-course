@@ -33,6 +33,15 @@ airflow_fernet_key           = ""
 # Для airflow_webserver_secret_key выполните: openssl rand -base64 32
 airflow_webserver_secret_key = ""
 
+# --- Kafka Configuration (optional) ---
+enable_kafka                = false
+kafka_version               = "7.5.0"
+topic_1min                  = "topic_1min"
+topic_5min                  = "topic_5min"
+kafka_admin_user            = "kafka_admin"
+kafka_admin_password        = "your_kafka_admin_password_here"
+kafka_ssl_keystore_password = "your_kafka_ssl_password_here"
+
 # PostgreSQL Configuration (для Airflow и будущих BI инструментов)
 postgres_version = "16-alpine"
 postgres_data_path = "../../volumes/postgres/data"
