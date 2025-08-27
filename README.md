@@ -111,6 +111,7 @@ This repository is equipped with a production-ready CI/CD pipeline powered by Gi
 14) [Monitoring, Metrics, and Logging](./hw14_monitoring-metrics-logging)
 15) [Query Profiling](./hw15_query-profiling)
 16) [Data Loading to ClickHouse](./hw16_data-loading)
+17) [Apache Kafka Integration](./hw17_kafka-integration)
 
 **Additionally:**
 - [Infrastructure modules and automation scripts (Terraform, Docker, ClickHouse)](./base-infra)
@@ -143,3 +144,4 @@ Upon completion of the course, students acquire skills in:
 ## 👨‍💻 Author
 
 [Vladislav Kuzmin](https://github.com/principalwater) - Data Engineer, student of "ClickHouse for DB Engineers and Architects" course | OTUS
+urse | OTUS
