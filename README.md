@@ -37,6 +37,7 @@
 14) [Мониторинг, метрики и логирование](./hw14_monitoring-metrics-logging)
 15) [Профилирование запросов](./hw15_query-profiling)
 16) [Загрузка данных в ClickHouse](./hw16_data-loading)
+17) [Интеграция с Apache Kafka](./hw17_kafka-integration)
 
 **Дополнительно:**
 - [Инфраструктурные модули и сценарии автоматизации (Terraform, Docker, ClickHouse)](./base-infra)
