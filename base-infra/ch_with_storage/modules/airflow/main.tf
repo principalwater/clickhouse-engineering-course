@@ -186,7 +186,7 @@ locals {
       container_path = "/var/run/docker.sock"
     }
   ] : []
-  
+
   # Общие лейблы для всех контейнеров Airflow
   airflow_common_labels = merge(local.common_labels, {
     "com.docker.compose.service" = "airflow"
@@ -301,21 +301,21 @@ resource "docker_container" "airflow_api_server" {
   networks_advanced {
     name = docker_network.airflow_network[0].name
   }
-  
+
   dynamic "networks_advanced" {
     for_each = var.clickhouse_network_name != "" ? [1] : []
     content {
       name = var.clickhouse_network_name
     }
   }
-  
+
   dynamic "networks_advanced" {
     for_each = var.kafka_network_name != "" ? [1] : []
     content {
       name = var.kafka_network_name
     }
   }
-  
+
   dynamic "networks_advanced" {
     for_each = var.postgres_network_name != "" ? [1] : []
     content {
@@ -381,21 +381,21 @@ resource "docker_container" "airflow_scheduler" {
   networks_advanced {
     name = docker_network.airflow_network[0].name
   }
-  
+
   dynamic "networks_advanced" {
     for_each = var.clickhouse_network_name != "" ? [1] : []
     content {
       name = var.clickhouse_network_name
     }
   }
-  
+
   dynamic "networks_advanced" {
     for_each = var.kafka_network_name != "" ? [1] : []
     content {
       name = var.kafka_network_name
     }
   }
-  
+
   dynamic "networks_advanced" {
     for_each = var.postgres_network_name != "" ? [1] : []
     content {
@@ -456,21 +456,21 @@ resource "docker_container" "airflow_worker" {
   networks_advanced {
     name = docker_network.airflow_network[0].name
   }
-  
+
   dynamic "networks_advanced" {
     for_each = var.clickhouse_network_name != "" ? [1] : []
     content {
       name = var.clickhouse_network_name
     }
   }
-  
+
   dynamic "networks_advanced" {
     for_each = var.kafka_network_name != "" ? [1] : []
     content {
       name = var.kafka_network_name
     }
   }
-  
+
   dynamic "networks_advanced" {
     for_each = var.postgres_network_name != "" ? [1] : []
     content {
@@ -539,7 +539,7 @@ resource "docker_container" "airflow_triggerer" {
   networks_advanced {
     name = docker_network.airflow_network[0].name
   }
-  
+
   dynamic "networks_advanced" {
     for_each = var.postgres_network_name != "" ? [1] : []
     content {
@@ -606,7 +606,7 @@ resource "docker_container" "airflow_dag_processor" {
   networks_advanced {
     name = docker_network.airflow_network[0].name
   }
-  
+
   dynamic "networks_advanced" {
     for_each = var.postgres_network_name != "" ? [1] : []
     content {
@@ -670,7 +670,7 @@ resource "docker_container" "airflow_flower" {
   networks_advanced {
     name = docker_network.airflow_network[0].name
   }
-  
+
   dynamic "networks_advanced" {
     for_each = var.postgres_network_name != "" ? [1] : []
     content {

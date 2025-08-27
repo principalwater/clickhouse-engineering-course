@@ -52,7 +52,7 @@ resource "docker_container" "postgres" {
     timeout  = "5s"
     retries  = 5
   }
-  
+
   # Лейблы для группировки контейнеров
   labels {
     label = "com.docker.compose.project"

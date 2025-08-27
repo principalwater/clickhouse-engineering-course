@@ -114,33 +114,33 @@ module "clickhouse_cluster" {
 # --- PostgreSQL Module ---
 module "postgres" {
   source = "./modules/postgres"
-  
+
   # Основные настройки
   enable_postgres             = var.enable_airflow || var.enable_metabase || var.enable_superset
   postgres_version            = var.postgres_version
   postgres_data_path          = var.postgres_data_path
   postgres_superuser_password = var.super_user_password
-  
+
   # Флаги сервисов
   enable_airflow  = var.enable_airflow
   enable_metabase = var.enable_metabase
   enable_superset = var.enable_superset
-  
+
   # Airflow настройки
   airflow_pg_user     = var.airflow_pg_user
   airflow_pg_password = var.airflow_pg_password
   airflow_pg_db       = var.airflow_pg_db
-  
+
   # Metabase настройки (для будущего использования)
   metabase_pg_user     = var.metabase_pg_user
   metabase_pg_password = var.metabase_pg_password
   metabase_pg_db       = var.metabase_pg_db
-  
+
   # Superset настройки (для будущего использования)
   superset_pg_user     = var.superset_pg_user
   superset_pg_password = var.superset_pg_password
   superset_pg_db       = var.superset_pg_db
-  
+
   depends_on = [module.clickhouse_cluster]
 }
 
@@ -205,11 +205,11 @@ module "airflow" {
   deploy_airflow = true
 
   # Конфигурация подключения к ClickHouse
-  clickhouse_network_name = module.clickhouse_cluster.network_name
-  clickhouse_super_user   = var.super_user_name
+  clickhouse_network_name   = module.clickhouse_cluster.network_name
+  clickhouse_super_user     = var.super_user_name
   clickhouse_super_password = var.super_user_password
-  clickhouse_bi_user     = var.bi_user_name
-  clickhouse_bi_password = var.bi_user_password
+  clickhouse_bi_user        = var.bi_user_name
+  clickhouse_bi_password    = var.bi_user_password
 
   # Настройки Airflow с fallback к super_user если не указано
   airflow_admin_user     = var.airflow_admin_user != "" ? var.airflow_admin_user : "admin"
@@ -223,14 +223,14 @@ module "airflow" {
   scripts_path         = "${path.root}/../../additional/airflow/scripts"
 
   # Подключение к PostgreSQL из модуля postgres
-  postgres_network_name = module.postgres.postgres_network_name
+  postgres_network_name              = module.postgres.postgres_network_name
   airflow_postgres_connection_string = module.postgres.airflow_connection_string
-  airflow_postgres_password = var.airflow_pg_password != "" ? var.airflow_pg_password : var.super_user_password
+  airflow_postgres_password          = var.airflow_pg_password != "" ? var.airflow_pg_password : var.super_user_password
 
   # Секретные ключи
-  airflow_fernet_key = var.airflow_fernet_key
+  airflow_fernet_key           = var.airflow_fernet_key
   airflow_webserver_secret_key = var.airflow_webserver_secret_key
-  airflow_jwt_signing_key = var.airflow_jwt_signing_key
+  airflow_jwt_signing_key      = var.airflow_jwt_signing_key
 
   # Kafka настройки (опциональные)
   kafka_network_name = ""
@@ -238,15 +238,15 @@ module "airflow" {
   kafka_topic_5min   = "kafka_topic_5min"
 
   # Дополнительные настройки
-  airflow_version     = var.airflow_version
-  disable_healthchecks = false
-  enable_flower       = true
+  airflow_version        = var.airflow_version
+  disable_healthchecks   = false
+  enable_flower          = true
   airflow_webserver_port = 8080
-  airflow_flower_port   = 5555
+  airflow_flower_port    = 5555
 
   # Telegram (пустые значения - не используем)
   telegram_bot_token = ""
   telegram_chat_id   = ""
-  
+
   depends_on = [module.postgres]
 }
