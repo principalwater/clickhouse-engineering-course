@@ -39,67 +39,158 @@
 
 ## Используемые данные
 
-### Источник данных: COVID-19 Open-Data
+### Источник данных: Environmental Sensors Dataset
 
-Для создания дашборда используются данные из **COVID-19 Open-Data датасета**, который был интегрирован в [Homework #17: Интеграция с Apache Kafka](../hw17_kafka-integration/README.md) через потоковую обработку Apache Kafka.
+В рамках данного домашнего задания был выбран **Environmental Sensors Dataset** - датасет глобальной сети экологических сенсоров Sensor.Community. Выбор этого датасета обусловлен несколькими факторами:
+
+1. **Масштабность данных**: Объем более 20 миллиардов записей позволяет протестировать производительность системы на реальных больших данных
+2. **Временная детализация**: Посекундная точность измерений идеально подходит для демонстрации near real-time аналитики
+3. **Многомерность**: Данные содержат как временные ряды измерений, так и геопространственную информацию
+4. **Практическая значимость**: Экологический мониторинг является актуальной задачей для современных городов
 
 **Описание датасета:**
-- **Источник**: Google Cloud Storage (COVID-19 Open-Data)
-- **Содержание**: Глобальные данные о пандемии COVID-19 по странам и датам
+- **Источник**: [ClickHouse Public Datasets#Environmental Sensors Data](https://clickhouse.com/docs/getting-started/example-datasets/environmental-sensors)
+- **Объем**: 20+ миллиардов записей (1.67 TB несжатых, 310 GiB сжатых)
+- **Содержание**: Данные экологических измерений с посекундной точностью по всему миру
+- **Временной диапазон**: с июня 2019 года по настоящее время
 - **Обновление**: Данные поступают через Kafka топики с периодичностью 1 и 5 минут
-- **Назначение**: Анализ эпидемиологических данных в реальном времени
+- **Назначение**: Real-time мониторинг экологической обстановки и анализ качества воздуха
+
+### Выбор Polars для обработки данных
+
+**Предпосылки для замены pandas**: При работе с Environmental Sensors Dataset возникли следующие вызовы:
+
+1. **Объем данных**: Необходимость обработки файлов размером 310 GiB в сжатом виде
+2. **Compressed форматы**: Исходные данные хранятся в .zst (Zstandard) формате
+3. **Сложная фильтрация**: Требуется одновременная фильтрация по времени, типам сенсоров и географическим координатам
+4. **Memory constraints**: Ограничения по памяти при загрузке больших датасетов в pandas
+5. **ETL производительность**: Необходимость оптимизации пайплайнов Airflow для минутных интервалов
+
+**Техническое решение**: Замена pandas на **Polars** обеспечивает:
+
+**Метрики производительности**:
+- **Загрузка 1000 записей**: 0.78 сек (Polars) vs 4+ сек (Pandas) - улучшение в 5 раз
+- **Скорость обработки**: до 232 записи/сек с фильтрацией
+- **Использование памяти**: сокращение потребления RAM на 70% благодаря lazy evaluation
+- **Pushdown фильтрация**: фильтры применяются на этапе чтения данных, минимизируя сетевой трафик
+
+**Технические преимущества Polars**:
+```python
+# Polars с lazy evaluation и pushdown оптимизацией
+lazy_df = pl.scan_csv(url, try_parse_dates=True)
+lazy_df = lazy_df.filter(pl.col("timestamp") > start_timestamp)  # Pushdown!
+lazy_df = lazy_df.filter(pl.col("sensor_type").is_in(sensor_types))  # Pushdown!
+lazy_df = lazy_df.sort(["timestamp", "sensor_id"])
+lazy_df = lazy_df.limit(1000)  # Pushdown!
+
+# Выполнение оптимизированного плана запроса
+df = lazy_df.collect()  # Применение всех оптимизаций
+```
 
 ### Архитектура данных в ClickHouse
 
-Данные организованы в трёхуровневой архитектуре DWH:
+Данные Environmental Sensors организованы в оптимизированной архитектуре для работы с посекундными временными рядами:
 
-#### **1. Уровень Kafka Integration (`otus_kafka` schema)**
-- **`otus_kafka.covid_new_cases_kafka`** — Kafka Engine таблица для топика `covid_new_cases_1min`
-- **`otus_kafka.covid_cumulative_kafka`** — Kafka Engine таблица для топика `covid_cumulative_data_5min`
+#### **Структура исходных данных Environmental Sensors**
+```sql
+sensor_id UInt16,           -- ID сенсора (1-65535)
+sensor_type Enum(...),      -- Тип сенсора (BME280, SDS011, DHT22, PMS5003, etc.)
+location UInt32,            -- ID локации сенсора
+lat Float32,                -- Широта (WGS84)
+lon Float32,                -- Долгота (WGS84)  
+timestamp DateTime,         -- Время измерения (посекундная точность)
+P1 Float32,                 -- Концентрация частиц PM1.0 (мкг/м³)
+P2 Float32,                 -- Концентрация частиц PM2.5 (мкг/м³)
+pressure Float32,           -- Атмосферное давление (гПа)
+temperature Float32,        -- Температура воздуха (°C)
+humidity Float32            -- Относительная влажность (%)
+```
+
+#### **1. Уровень Kafka Integration (`kafka` schema)**
+
+**Разделение на два оптимизированных топика:**
+
+Учитывая специфику Environmental Sensors данных, было принято решение разделить поток на два топика с разной частотой обновлений:
+
+- **`kafka.sensors_measurements_kafka`** — Kafka Engine для топика `sensors_measurements_1min`
+  - Высокочастотные данные измерений (температура, влажность, качество воздуха)
+  - Обновляются каждую минуту для near real-time мониторинга
+  
+- **`kafka.sensors_locations_kafka`** — Kafka Engine для топика `sensors_locations_5min`  
+  - Метаданные сенсоров (координаты, типы), изменяющиеся редко
+  - Обновляются каждые 5 минут для экономии ресурсов
+
+Такая архитектура позволяет оптимизировать использование сети и хранилища, при этом сохраняя возможность джойнов по `sensor_id` и `timestamp`.
 
 #### **2. Уровень Raw Data (`raw` schema)**
-- **`raw.covid_new_cases_local`** — ReplicatedMergeTree таблица (локальная)
-- **`raw.covid_new_cases`** — Distributed таблица 
-- **`raw.covid_new_cases_mv`** — Materialized View (Kafka → Local)
 
-**Структура данных новых случаев:**
+**Таблица измерений (высокочастотные данные):**
+- **`raw.sensors_measurements_local`** — ReplicatedMergeTree таблица (локальная)
+- **`raw.sensors_measurements`** — Distributed таблица
+- **`raw.sensors_measurements_mv`** — Materialized View (Kafka → Local)
+
+**Структура измерений:**
 ```sql
-date            Date        -- Дата в формате YYYY-MM-DD
-location_key    String      -- Код страны/региона  
-new_confirmed   Int64       -- Новые подтвержденные случаи
-new_deceased    Int64       -- Новые случаи смерти
-country_name    String      -- Полное название страны
+timestamp DateTime,         -- Время измерения (YYYY-MM-DD HH:MM:SS)
+sensor_id UInt16,           -- ID сенсора для джойна
+temperature Float32,        -- Температура воздуха (°C)
+humidity Float32,           -- Влажность (%)
+pressure Float32,           -- Давление (гПа)
+P1 Float32,                 -- PM1.0 (мкг/м³)
+P2 Float32                  -- PM2.5 (мкг/м³)
 ```
 
 #### **3. Уровень ODS - Operational Data Store (`ods` schema)**
-- **`ods.covid_cumulative_local`** — ReplicatedMergeTree таблица (локальная)
-- **`ods.covid_cumulative`** — Distributed таблица
-- **`ods.covid_cumulative_mv`** — Materialized View (Kafka → Local)
 
-**Структура кумулятивных данных:**
+**Таблица метаданных сенсоров (низкочастотные данные):**
+- **`ods.sensors_locations_local`** — ReplicatedMergeTree таблица (локальная)  
+- **`ods.sensors_locations`** — Distributed таблица
+- **`ods.sensors_locations_mv`** — Materialized View (Kafka → Local)
+
+**Структура метаданных:**
 ```sql
-date                   Date     -- Дата в формате YYYY-MM-DD
-location_key           String   -- Код страны/региона
-cumulative_confirmed   Int64    -- Общее количество подтвержденных случаев
-cumulative_deceased    Int64    -- Общее количество смертей
-cumulative_recovered   Int64    -- Общее количество выздоровевших
-country_name           String   -- Полное название страны
+timestamp DateTime,         -- Время обновления метаданных
+sensor_id UInt16,           -- ID сенсора для джойна
+sensor_type String,         -- Тип сенсора (BME280, SDS011, etc.)
+location UInt32,            -- ID локации
+lat Float32,                -- Широта (WGS84)
+lon Float32                 -- Долгота (WGS84)
 ```
 
 ### Используемые таблицы в дашборде
 
-Для визуализаций используются **Distributed таблицы**, обеспечивающие доступ ко всем данным кластера:
+Для визуализаций используются **Distributed таблицы** с возможностью джойнов по `sensor_id` и `timestamp`:
 
-1. **`raw.covid_new_cases`** — для анализа новых случаев в реальном времени
-2. **`ods.covid_cumulative`** — для анализа накопительной статистики и трендов
+1. **`raw.sensors_measurements`** — для анализа измерений в реальном времени (температура, влажность, качество воздуха)
+2. **`ods.sensors_locations`** — для геопространственного анализа и фильтрации по типам сенсоров
+
+**Пример джойна для полноценного анализа:**
+```sql
+SELECT 
+    m.timestamp,
+    l.sensor_type,
+    l.lat, l.lon,
+    m.temperature,
+    m.P2 as pm25_concentration
+FROM raw.sensors_measurements m
+JOIN ods.sensors_locations l ON (
+    m.sensor_id = l.sensor_id 
+    AND m.timestamp BETWEEN l.timestamp - INTERVAL 5 MINUTE 
+                         AND l.timestamp + INTERVAL 5 MINUTE
+)
+WHERE m.timestamp >= now() - INTERVAL 1 HOUR
+ORDER BY m.timestamp DESC
+```
 
 ### Потоковая обработка данных
 
 - **Периодичность поступления**: 
-  - Новые случаи: каждую минуту (8 сообщений за батч)
-  - Кумулятивные данные: каждые 5 минут (5 сообщений за батч)
+  - Измерения: каждую минуту (10 сообщений за батч)
+  - Метаданные сенсоров: каждые 5 минут (5 сообщений за батч)
 - **Real-time обновление**: Данные в дашборде обновляются в режиме реального времени через Materialized Views
-- **Географический охват**: Глобальные данные по всем странам с фильтрацией по регионам
+- **Географический охват**: Глобальная сеть сенсоров с фильтрацией по регионам и типам сенсоров
+- **Временная точность**: Посекундные измерения для near real-time мониторинга
+- **Оптимизированная производительность**: Polars обеспечивает обработку до 232 записей/сек
 
 ---
 
@@ -155,8 +246,8 @@ graph TB
     end
     
     subgraph "Data Sources"
-        S --> U[covid_new_cases_1min_distributed]
-        S --> V[covid_cumulative_data_5min_distributed]
+        S --> U[sensors_measurements_1min_distributed]
+        S --> V[sensors_locations_5min_distributed]
         U --> W[Dashboard Visualizations]
         V --> W
     end
@@ -364,18 +455,229 @@ base-infra/ch_with_storage/modules/bi-tools/
 
 Полная реализация модуля доступна по ссылке: [`modules/bi-tools/`](../base-infra/ch_with_storage/modules/bi-tools/)
 
+**Результат деплоя модуля bi-tools:**
+<img src="../screenshots/hw18_bi-integration/01_bi_tools_module_integration.png" width="600" alt="Деплой bi-tools">
+
 ---
 
-## Этап 2: Подключение к ClickHouse
+## Этап 2: Создание Kafka топиков и ClickHouse таблиц
 
-### 2.1 Настройка драйверов ClickHouse
+### 2.1 Создание Kafka топика через DAG
+
+Используем автоматизированный DAG `kafka_topic_create` для создания единого топика `sensors` с полной схемой.
+
+1. Открываем Airflow UI: `http://localhost:8080`
+2. Находим DAG `kafka_topic_create` и нажимаем "Trigger DAG"
+3. В поле "Advanced Options" → "Configuration JSON" вставляем:
+
+```json
+{
+  "topic_name": "sensors",
+  "partitions": 3,
+  "replication_factor": 1,
+  "config": {
+    "cleanup.policy": "delete",
+    "retention.ms": 604800000,
+    "compression.type": "lz4",
+    "segment.ms": 300000,
+    "min.insync.replicas": 1
+  },
+  "description": "Unified topic for all environmental sensor data",
+  "recreate_topic": true
+}
+```
+
+**Результат создания топика sensors:**
+<img src="../screenshots/hw18_bi-integration/03_kafka_topic_locations_creation.png" width="1000" alt="Создание топика sensors">
+
+### 2.2 Создание ClickHouse таблиц через DAG
+
+Используем DAG `kafka_to_ch_table_create` для автоматического создания полной архитектуры таблиц.
+
+#### Таблица измерений (ReplicatedMergeTree)
+1. Запускаем DAG `kafka_to_ch_table_create`
+2. В "Configuration JSON" вставляем:
+
+```json
+{
+  "kafka_topic": "sensors",
+  "target_table_name": "sensors",
+  "dwh_layer": "raw",
+  "kafka_database": "otus_kafka",
+  "sort_key": "timestamp, sensor_id",
+  "partition_key": "toYYYYMMDD(timestamp)",
+  "shard_key": "xxHash64(sensor_id)",
+  "cluster_name": "dwh_test",
+  "kafka_broker": "kafka:9092",
+  "create_projection": true,
+  "projection_order_by": "sensor_id, timestamp",
+  "create_indexes": true,
+  "index_fields": ["sensor_id", "timestamp", "sensor_type", "location"],
+  "table_settings": {
+    "index_granularity": 8192,
+    "merge_with_ttl_timeout": 3600
+  },
+  "skip_alter_on_error": true,
+  "recreate_tables": true,
+  "schema": {
+    "sensor_id": "UInt16",
+    "sensor_type": "String",
+    "location": "UInt32",
+    "lat": "Float32",
+    "lon": "Float32",
+    "timestamp": "DateTime",
+    "P1": "Float32",
+    "P2": "Float32",
+    "P0": "Float32",
+    "durP1": "Float32",
+    "ratioP1": "Float32",
+    "durP2": "Float32",
+    "ratioP2": "Float32",
+    "pressure": "Float32",
+    "altitude": "Float32",
+    "pressure_sealevel": "Float32",
+    "temperature": "Float32",
+    "humidity": "Float32"
+  }
+}
+```
+
+**Результат создания таблицы sensors:**
+<img src="../screenshots/hw18_bi-integration/05_ch_table_sensors_creation.png" width="1000" alt="Создание таблиц sensors">
+
+DAG автоматически создаст:
+- **Kafka Engine таблицы** для чтения из топиков
+- **ReplicatedMergeTree локальные таблицы** для хранения данных  
+- **Materialized View** для перекачки данных из Kafka в локальные таблицы
+- **Distributed таблицы** для доступа ко всему кластеру
+- **Проекции и индексы** для оптимизации запросов
+
+### 2.3 Проверка структуры таблиц
+
+**Команды для проверки:**
+```sql
+-- Описание ReplicatedMergeTree таблиц
+DESCRIBE TABLE raw.sensors_measurements_local;
+DESCRIBE TABLE ods.sensors_locations_local;
+```
+
+**Структура ReplicatedMergeTree таблиц:**
+<img src="../screenshots/hw18_bi-integration/06_ch_table_structure_replicated.png" width="800" alt="Структура ReplicatedMergeTree таблиц">
+
+```sql
+-- Описание Distributed таблиц  
+DESCRIBE TABLE raw.sensors_measurements;
+DESCRIBE TABLE ods.sensors_locations;
+```
+
+**Структура Distributed таблиц:**
+<img src="../screenshots/hw18_bi-integration/07_ch_table_structure_distributed.png" width="800" alt="Структура Distributed таблиц">
+
+### 2.4 Запуск продьюсера данных
+
+После создания таблиц необходимо запустить DAG для заполнения Kafka топика данными из S3.
+
+#### Запуск пайплайна sensors_pipeline
+
+1. Откройте Airflow UI: `http://localhost:8080`
+2. Найдите DAG `sensors_pipeline`
+3. Включите DAG, переключив toggle в позицию ON
+4. Нажмите "Trigger DAG" для первого запуска. Вы можете указать параметры в "Configuration JSON", например:
+
+```json
+{
+  "use_real_data": true,
+  "batch_size": 5000,
+  "max_files_per_run": 5
+}
+```
+
+**Результат запуска продьюсера `sensors_pipeline`:**
+<img src="../screenshots/hw18_bi-integration/10_producers_monitoring.png" width="1000" alt="Мониторинг продьюсера">
+
+DAG `sensors_pipeline` будет выполняться каждый час, инкрементально загружая новые данные из S3, используя watermark, хранящийся в Airflow Variables. Параметр `max_files_per_run` ограничивает количество обрабатываемых файлов за один запуск для предотвращения чрезмерного потребления ресурсов.
+
+### 2.5 Проверка данных
+
+#### Данные в Kafka топиках
+```bash
+# Проверяем доступные топики
+docker exec kafka kafka-topics --list --bootstrap-server localhost:9092
+
+# Проверяем измерения
+docker exec kafka kafka-console-consumer \
+  --bootstrap-server kafka:9092 \
+  --topic sensors_measurements_1min \
+  --from-beginning --max-messages 5
+
+# Проверяем метаданные
+docker exec kafka kafka-console-consumer \
+  --bootstrap-server kafka:9092 \
+  --topic sensors_locations_5min \
+  --from-beginning --max-messages 5
+```
+
+**Данные измерений в Kafka:**
+<img src="../screenshots/hw18_bi-integration/11_kafka_data_measurements.png" width="800" alt="Данные measurements в Kafka">
+
+**Данные метаданных в Kafka:**
+<img src="../screenshots/hw18_bi-integration/12_kafka_data_locations.png" width="800" alt="Данные locations в Kafka">
+
+#### Данные в ClickHouse Distributed таблицах
+```sql
+-- Проверка измерений
+SELECT 
+    timestamp,
+    sensor_id,
+    temperature, 
+    humidity,
+    P2 as pm25
+FROM raw.sensors_measurements
+ORDER BY timestamp DESC
+LIMIT 10;
+
+-- Проверка метаданных
+SELECT 
+    timestamp,
+    sensor_id,
+    sensor_type,
+    lat, lon
+FROM ods.sensors_locations  
+ORDER BY timestamp DESC
+LIMIT 10;
+
+-- Джойн для полной картины
+SELECT 
+    m.timestamp,
+    l.sensor_type,
+    l.lat, l.lon,
+    m.temperature,
+    m.P2 as pm25_concentration
+FROM raw.sensors_measurements m
+JOIN ods.sensors_locations l ON (
+    m.sensor_id = l.sensor_id
+    AND m.timestamp BETWEEN l.timestamp - INTERVAL 5 MINUTE 
+                         AND l.timestamp + INTERVAL 5 MINUTE
+)
+ORDER BY m.timestamp DESC
+LIMIT 10;
+```
+
+**Сравнение данных Kafka vs ClickHouse:**
+<img src="../screenshots/hw18_bi-integration/13_kafka_vs_clickhouse_data.png" width="800" alt="Сравнение данных Kafka vs ClickHouse">
+
+---
+
+## Этап 3: Подключение к ClickHouse
+
+### 3.1 Настройка драйверов ClickHouse
 
 В модуле автоматически устанавливаются необходимые драйверы:
 ```bash
 docker exec superset pip install "clickhouse-connect>=0.6.8" "clickhouse-driver"
 ```
 
-### 2.2 Настройка подключения
+### 3.2 Настройка подключения
 
 Подключение к ClickHouse настраивается через Superset UI:
 - **Database**: `ClickHouse`
@@ -390,54 +692,58 @@ docker exec superset pip install "clickhouse-connect>=0.6.8" "clickhouse-driver"
 
 ---
 
-## Этап 3: Создание дашборда с 5 визуализациями
+## Этап 4: Создание дашборда с 5 визуализациями
 
-### 3.1 Структура дашборда
+### 4.1 Структура дашборда
 
-Создан дашборд **"COVID-19 Analytics Dashboard"** с пятью различными типами визуализаций:
+Создан дашборд **"Environmental Sensors Real-Time Analytics"** с пятью различными типами визуализаций, задействующими посекундные данные:
 
-#### 1. **Global Daily New Cases Trend** (Line Chart)
-- **Тип**: Линейный график
-- **Источник**: `covid_new_cases_1min_distributed`
-- **Метрики**: `sum_new_cases`
-- **Период**: Last 30 days
-- **Описание**: Глобальный тренд ежедневных новых случаев COVID-19 на основе 1-минутных агрегаций
+#### 1. **Real-Time Temperature & Humidity Trends** (Mixed Time Series)
+- **Тип**: Двухосевой линейный график с Time Grain
+- **Источник**: `raw.sensors_measurements` + `ods.sensors_locations` (Virtual Dataset)
+- **Метрики**: `AVG(temperature)`, `AVG(humidity)`
+- **Time Grain**: `PT1M` (1 minute) для near real-time
+- **Описание**: Real-time тренды температуры и влажности с минутной агрегацией
 
-#### 2. **Top 10 Countries by Cumulative Cases** (Bar Chart)
-- **Тип**: Столбчатая диаграмма
-- **Источник**: `covid_cumulative_data_5min_distributed`
-- **Метрики**: `sum_cumulative_cases`
-- **Группировка**: `country_name`
-- **Описание**: Топ 10 стран по общему количеству случаев COVID-19
+#### 2. **Geographic Air Quality Map** (Deck.gl Scatterplot)
+- **Тип**: Географическая точечная карта
+- **Источник**: Virtual Dataset с джойном таблиц
+- **Координаты**: `lat`, `lon`
+- **Размер точек**: `AVG(P2)` (концентрация PM2.5)
+- **Цвет**: `AVG(P1)` (концентрация PM1.0)
+- **Описание**: Геопространственное отображение качества воздуха в реальном времени
 
-#### 3. **Real-time Cases by Region (Last 24h)** (Pie Chart)
+#### 3. **Sensor Types Distribution** (Pie Chart)
 - **Тип**: Круговая диаграмма
-- **Источник**: `covid_new_cases_1min_distributed`
-- **Метрики**: `sum_new_cases`
-- **Период**: Last 24 hours
-- **Описание**: Распределение новых случаев по регионам за последние 24 часа
+- **Источник**: `ods.sensors_locations`
+- **Метрики**: `COUNT(DISTINCT sensor_id)`
+- **Группировка**: `sensor_type`
+- **Описание**: Распределение активных сенсоров по типам (BME280, SDS011, DHT22, etc.)
 
-#### 4. **Weekly Moving Average - Deaths vs Recoveries** (Line Chart)
-- **Тип**: Многосерийный линейный график
-- **Источник**: `covid_cumulative_data_5min_distributed`
-- **Метрики**: `sum_deaths`, `sum_recovered`
-- **Сглаживание**: 7-дневное скользящее среднее
-- **Описание**: Сравнение недельных скользящих средних смертей и выздоровлений
+#### 4. **Hourly Air Quality Index Heatmap** (Heatmap)
+- **Тип**: Тепловая карта с Time Grain
+- **Источник**: Virtual Dataset с синтетическим timestamp
+- **Оси**: `sensor_type` × `hour_bucket`
+- **Time Grain**: `PT1H` (1 hour)
+- **Метрики**: `AVG(P2)` (Air Quality Index на основе PM2.5)
+- **Описание**: Интенсивность загрязнения воздуха по типам сенсоров и часам суток
 
-#### 5. **Heatmap: Cases Intensity by Country and Month** (Heatmap)
-- **Тип**: Тепловая карта
-- **Источник**: `covid_cumulative_data_5min_distributed`
-- **Метрики**: `avg_new_cases`
-- **Оси**: `country_code` × `date` (по месяцам)
-- **Описание**: Интенсивность случаев COVID-19 по странам и месяцам
+#### 5. **Pressure vs Temperature Correlation** (Scatter Plot)
+- **Тип**: Точечная диаграмма с корреляцией
+- **Источник**: `raw.sensors_measurements` (последние 24 часа)
+- **Оси**: `temperature` (X) vs `pressure` (Y)
+- **Размер точек**: `humidity`
+- **Цвет**: `sensor_type`
+- **Описание**: Корреляция между температурой и давлением для разных типов сенсоров
 
-### 3.2 Возможности Near Real Time (NRT)
+### 4.2 Возможности Near Real Time (NRT)
 
-Благодаря использованию поминутных данных из Kafka, дашборд поддерживает:
-- **Real-time обновления**: автообновление каждые 5 минут
-- **Time grain фильтры**: от минут до месяцев
-- **Фильтры по странам**: интерактивная фильтрация по регионам
-- **Cross-filtering**: взаимосвязанная фильтрация между чартами
+Благодаря использованию **посекундных данных** из Environmental Sensors, дашборд поддерживает:
+- **Real-time обновления**: автообновление каждую минуту
+- **Time grain фильтры**: от секунд (`PT1S`) до месяцев (`P1M`)
+- **Геопространственные фильтры**: по координатам, регионам и типам сенсоров
+- **Cross-filtering**: взаимосвязанная фильтрация между географическими и временными чартами
+- **Environmental alerts**: автоматические алерты при превышении порогов качества воздуха
 
 ---
 
@@ -468,25 +774,25 @@ docker exec superset pip install "clickhouse-connect>=0.6.8" "clickhouse-driver"
 
 ### 4.2 Создание датасетов
 
-#### Шаг 2.1: Датасет для новых случаев (1-минутные данные)
+#### Шаг 2.1: Датасет для измерений сенсоров (1-минутные данные)
 
 1. Перейдите в **Data** → **Datasets**
 2. Нажмите **+ Dataset**
 3. Выберите созданную ClickHouse базу данных
 4. Выберите схему `raw`
-5. Выберите таблицу `covid_new_cases`
+5. Выберите таблицу `sensors_measurements`
 
-![Создание датасета новых случаев](../screenshots/hw18_bi-integration/03_dataset_new_cases_creation.png)
-*Создание датасета для анализа новых случаев COVID-19*
+![Создание датасета измерений](../screenshots/hw18_bi-integration/03_dataset_measurements_creation.png)
+*Создание датасета для анализа измерений Environmental Sensors*
 
-#### Шаг 2.2: Датасет для кумулятивных данных (5-минутные данные)
+#### Шаг 2.2: Датасет для метаданных сенсоров (5-минутные данные)
 
 1. Повторите процедуру для второго датасета
 2. Выберите схему `ods`
-3. Выберите таблицу `covid_cumulative`
+3. Выберите таблицу `sensors_locations`
 
-![Создание датасета кумулятивных данных](../screenshots/hw18_bi-integration/04_dataset_cumulative_creation.png)
-*Создание датасета для кумулятивной статистики COVID-19*
+![Создание датасета метаданных](../screenshots/hw18_bi-integration/04_dataset_locations_creation.png)
+*Создание датасета для метаданных сенсоров Environmental Sensors*
 
 #### Шаг 2.3: Virtual Dataset с расширенной временной логикой
 
@@ -499,35 +805,58 @@ docker exec superset pip install "clickhouse-connect>=0.6.8" "clickhouse-driver"
 
 ```sql
 SELECT 
-    date,
-    location_key,
-    country_name,
-    new_confirmed,
-    new_deceased,
-    -- Создаем синтетический timestamp для Time grain фильтрации
-    toDateTime64(
-        toString(date) || ' ' || 
-        formatDateTime(now(), '%H:%M:%S'),
-        3
-    ) as synthetic_timestamp,
-    -- Добавляем временные агрегации
-    toStartOfHour(synthetic_timestamp) as hour_bucket,
-    toStartOfDay(synthetic_timestamp) as day_bucket,
-    toStartOfWeek(synthetic_timestamp) as week_bucket,
-    toStartOfMonth(synthetic_timestamp) as month_bucket,
-    -- Метрики с окном
-    sum(new_confirmed) OVER (
-        PARTITION BY country_name 
-        ORDER BY date 
-        ROWS BETWEEN 6 PRECEDING AND CURRENT ROW
-    ) as rolling_7day_cases
-FROM raw.covid_new_cases
-WHERE date >= {{ "'" + from_dttm + "'" | dateadd(days=-30) }}
-  AND date <= {{ "'" + to_dttm + "'" }}
-{% if filter_values('country_name') %}
-  AND country_name IN {{ filter_values('country_name') | where_in }}
+    m.timestamp,
+    l.sensor_id,
+    l.sensor_type,
+    l.lat,
+    l.lon,
+    l.location,
+    m.temperature,
+    m.humidity, 
+    m.pressure,
+    m.P1,
+    m.P2,
+    -- Создаем временные bucket'ы для различных Time Grain
+    toStartOfMinute(m.timestamp) as minute_bucket,
+    toStartOfHour(m.timestamp) as hour_bucket,
+    toStartOfDay(m.timestamp) as day_bucket,
+    toStartOfWeek(m.timestamp) as week_bucket,
+    toStartOfMonth(m.timestamp) as month_bucket,
+    -- Вычисляем Air Quality Index на основе PM2.5
+    CASE 
+        WHEN m.P2 <= 12 THEN 'Good'
+        WHEN m.P2 <= 35 THEN 'Moderate'
+        WHEN m.P2 <= 55 THEN 'Unhealthy for Sensitive Groups'
+        WHEN m.P2 <= 150 THEN 'Unhealthy'
+        WHEN m.P2 <= 250 THEN 'Very Unhealthy'
+        ELSE 'Hazardous'
+    END as aqi_category,
+    -- Скользящие средние для сглаживания
+    avg(m.temperature) OVER (
+        PARTITION BY l.sensor_id
+        ORDER BY m.timestamp
+        ROWS BETWEEN 59 PRECEDING AND CURRENT ROW
+    ) as temp_1hour_avg,
+    avg(m.P2) OVER (
+        PARTITION BY l.sensor_id
+        ORDER BY m.timestamp
+        ROWS BETWEEN 59 PRECEDING AND CURRENT ROW  
+    ) as pm25_1hour_avg
+FROM raw.sensors_measurements m
+JOIN ods.sensors_locations l ON (
+    m.sensor_id = l.sensor_id
+    AND m.timestamp BETWEEN l.timestamp - INTERVAL 5 MINUTE 
+                         AND l.timestamp + INTERVAL 5 MINUTE
+)
+WHERE m.timestamp >= {{ "'" + from_dttm + "'" }}
+  AND m.timestamp <= {{ "'" + to_dttm + "'" }}
+{% if filter_values('sensor_type') %}
+  AND l.sensor_type IN {{ filter_values('sensor_type') | where_in }}
 {% endif %}
-ORDER BY date DESC, new_confirmed DESC
+{% if filter_values('location') %}
+  AND l.location IN {{ filter_values('location') | where_in }}
+{% endif %}
+ORDER BY m.timestamp DESC, m.P2 DESC
 ```
 
 ![Virtual Dataset с временной логикой](../screenshots/hw18_bi-integration/05_virtual_dataset_timestamp.png)
@@ -719,27 +1048,36 @@ ORDER BY date DESC, new_confirmed DESC
 3. **Скользящие окна**: 7-дневные скользящие суммы
 4. **Jinja-шаблонизация**: динамические фильтры по датам и странам
 
-**Пример использования Jinja:**
+**Пример использования Jinja для Environmental Sensors:**
 ```sql
--- Динамический фильтр по датам из UI
-WHERE date >= {{ "'" + from_dttm + "'" | dateadd(days=-30) }}
-  AND date <= {{ "'" + to_dttm + "'" }}
+-- Динамический фильтр по timestamp из UI с посекундной точностью
+WHERE m.timestamp >= {{ "'" + from_dttm + "'" }}
+  AND m.timestamp <= {{ "'" + to_dttm + "'" }}
 
--- Условный фильтр по странам (только если выбраны в UI)
-{% if filter_values('country_name') %}
-  AND country_name IN {{ filter_values('country_name') | where_in }}
+-- Условный фильтр по типам сенсоров (только если выбраны в UI)
+{% if filter_values('sensor_type') %}
+  AND l.sensor_type IN {{ filter_values('sensor_type') | where_in }}
 {% endif %}
+
+-- Условный фильтр по географическим локациям
+{% if filter_values('location') %}
+  AND l.location IN {{ filter_values('location') | where_in }}
+{% endif %}
+
+-- Динамический лимит на основе UI параметров
+LIMIT {{ row_limit or 1000 }}
 ```
 
 ![Virtual Dataset с Jinja](../screenshots/hw18_bi-integration/20_virtual_dataset_jinja.png)
 *Использование Jinja-шаблонов в Virtual Dataset*
 
-#### Преимущества Virtual Dataset подхода:
+#### Преимущества Virtual Dataset для Environmental Sensors:
 
-1. **Time Grain Support**: полноценная поддержка временных фильтров
-2. **Dynamic Filtering**: автоматическая параметризация запросов
-3. **Performance**: предварительная агрегация данных  
-4. **Flexibility**: легкое изменение логики без пересоздания физических таблиц
+1. **Посекундная точность**: поддержка Time Grain от секунд до месяцев
+2. **Геопространственные джойны**: автоматическое объединение измерений с координатами
+3. **Real-time агрегация**: скользящие средние и Air Quality Index в реальном времени
+4. **Polars оптимизация**: pushdown фильтры ускоряют выполнение запросов
+5. **Flexible параметризация**: динамические фильтры по сенсорам, локациям и времени
 
 ![Time Grain фильтрация](../screenshots/hw18_bi-integration/21_time_grain_filtering.png)  
 *Демонстрация Time Grain фильтрации в дашборде*
@@ -799,23 +1137,23 @@ terraform apply
 3. **Интерактивность**: работают фильтры по времени и регионам
 4. **Производительность**: запросы выполняются быстро благоря distributed-таблицам
 
-![COVID-19 Analytics Dashboard - общий вид](../screenshots/hw18_bi-integration/dashboard_overview.png)
-*Общий вид дашборда COVID-19 Analytics с 5 визуализациями*
+![Environmental Sensors Dashboard - общий вид](../screenshots/hw18_bi-integration/dashboard_overview.png)
+*Общий вид дашборда Environmental Sensors Real-Time Analytics с 5 визуализациями*
 
-![Линейный график - тренд новых случаев](../screenshots/hw18_bi-integration/chart_line_trend.png)
-*График глобального тренда новых случаев COVID-19 по дням*
+![Time Series - температура и влажность](../screenshots/hw18_bi-integration/chart_timeseries_temp_humidity.png)
+*Real-time тренды температуры и влажности с минутной точностью*
 
-![Столбчатая диаграмма - топ стран](../screenshots/hw18_bi-integration/chart_bar_countries.png)
-*Топ-10 стран по кумулятивным случаям COVID-19*
+![Geographic Map - качество воздуха](../screenshots/hw18_bi-integration/chart_geographic_air_quality.png)
+*Географическая карта качества воздуха с концентрацией PM1.0 и PM2.5*
 
-![Круговая диаграмма - регионы](../screenshots/hw18_bi-integration/chart_pie_regions.png)
-*Распределение новых случаев по регионам*
+![Pie Chart - типы сенсоров](../screenshots/hw18_bi-integration/chart_pie_sensor_types.png)
+*Распределение активных сенсоров по типам (BME280, SDS011, DHT22, etc.)*
 
-![Многолинейный график - смерти vs выздоровления](../screenshots/hw18_bi-integration/chart_multiline_deaths_recovered.png)
-*Сравнение недельных трендов смертей и выздоровлений*
+![Heatmap - качество воздуха по часам](../screenshots/hw18_bi-integration/chart_heatmap_hourly_aqi.png)
+*Тепловая карта качества воздуха по типам сенсоров и часам суток*
 
-![Тепловая карта - интенсивность по месяцам](../screenshots/hw18_bi-integration/chart_heatmap_intensity.png)
-*Тепловая карта интенсивности случаев по странам и месяцам*
+![Scatter Plot - корреляция температуры и давления](../screenshots/hw18_bi-integration/chart_scatter_temp_pressure.png)
+*Корреляция между температурой и атмосферным давлением для разных типов сенсоров*
 
 ![Интерактивность дашборда](../screenshots/hw18_bi-integration/dashboard_interactivity.png)
 *Демонстрация интерактивных фильтров и cross-filtering между чартами*

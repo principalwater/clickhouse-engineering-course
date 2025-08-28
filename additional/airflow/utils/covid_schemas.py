@@ -1,6 +1,6 @@
 import random
 import requests
-import pandas as pd
+import polars as pl
 from datetime import datetime, timedelta
 from typing import List, Dict
 
@@ -10,36 +10,97 @@ SAMPLE_LOCATIONS = [
     'BR', 'IN', 'CA', 'AU', 'MX', 'AR', 'TR', 'SA', 'ZA', 'EG'
 ]
 
-def load_covid_real_data(limit: int = 10000) -> List[Dict]:
+def load_covid_real_data(limit: int = 10000, start_date: str = None, locations_filter: List[str] = None) -> List[Dict]:
     """
-    Загружает реальные данные COVID-19 из Google Cloud Storage
+    Загружает и фильтрует реальные данные COVID-19 из Google Cloud Storage с использованием Polars и lazy evaluation.
     
     Args:
-        limit: Количество последних записей для загрузки
+        limit: Максимальное количество записей для загрузки.
+        start_date: Дата, с которой начинать загрузку (не включительно).
+        locations_filter: Список кодов стран для фильтрации.
     
     Returns:
         List[Dict]: Список записей COVID-19
     """
     try:
-        print(f"🔄 Загрузка реальных данных COVID-19 (последние {limit} записей)...")
+        if start_date:
+            print(f"🔄 Загрузка данных с Polars lazy evaluation (после {start_date}, лимит {limit}, страны: {locations_filter or 'все'})...")
+        else:
+            print(f"🔄 Загрузка данных с Polars lazy evaluation (лимит {limit}, страны: {locations_filter or 'все'})...")
+            
         url = "https://storage.googleapis.com/covid19-open-data/v3/epidemiology.csv"
+        print(f"   URL: {url}")
         
-        # Загружаем CSV с помощью pandas
-        df = pd.read_csv(url)
+        print("   Шаг 1: Создание lazy query с pushdown фильтрацией...")
         
-        # Фильтруем только записи с данными и сортируем по дате
-        df = df.dropna(subset=['date', 'location_key'])
-        df = df.sort_values(['date', 'location_key'])
+        # Создаем lazy dataframe с автоматическим определением схемы
+        lazy_df = pl.scan_csv(url, try_parse_dates=True)
         
-        # Берем последние записи
+        # Применяем фильтры с pushdown оптимизацией
+        print("   Шаг 2: Применение фильтров...")
+        
+        # Убираем записи с пустыми date и location_key
+        lazy_df = lazy_df.filter(
+            pl.col("date").is_not_null() & 
+            pl.col("location_key").is_not_null()
+        )
+        
+        # Фильтр по дате (pushdown)
+        if start_date:
+            print(f"   ...фильтр по дате > {start_date}")
+            # Конвертируем строку даты в datetime для корректного сравнения
+            start_date_dt = pl.datetime(int(start_date[:4]), int(start_date[5:7]), int(start_date[8:10]))
+            lazy_df = lazy_df.filter(pl.col("date") > start_date_dt)
+        
+        # Фильтр по странам (pushdown) 
+        if locations_filter:
+            print(f"   ...фильтр по странам: {locations_filter}")
+            lazy_df = lazy_df.filter(pl.col("location_key").is_in(locations_filter))
+        
+        # Сортировка для стабильного порядка
+        lazy_df = lazy_df.sort(["date", "location_key"])
+        
+        # Применяем лимит (pushdown)
         if limit:
-            df = df.tail(limit)
+            lazy_df = lazy_df.limit(limit)
         
-        print(f"✅ Загружено {len(df)} записей реальных данных COVID-19")
-        return df.to_dict('records')
+        print("   Шаг 3: Выполнение lazy query с оптимизациями...")
+        
+        # Выполняем lazy query - здесь происходит вся магия оптимизации
+        df = lazy_df.collect()
+        
+        if df.height == 0:
+            print("✅ Не найдено новых записей, соответствующих фильтрам.")
+            return []
+        
+        print("   Шаг 4: Обработка данных...")
+        
+        # Заполняем пропуски нулями для численных колонок
+        numeric_cols = ['new_confirmed', 'new_deceased', 'new_recovered', 'new_tested', 
+                       'cumulative_confirmed', 'cumulative_deceased', 'cumulative_recovered', 'cumulative_tested']
+        
+        # Проверяем какие колонки действительно существуют в данных
+        existing_numeric_cols = [col for col in numeric_cols if col in df.columns]
+        
+        if existing_numeric_cols:
+            df = df.with_columns([
+                pl.col(col).fill_null(0).cast(pl.Int64, strict=False) for col in existing_numeric_cols
+            ])
+        
+        # Форматируем дату в YYYY-MM-DD
+        df = df.with_columns([
+            pl.col("date").dt.strftime("%Y-%m-%d").alias("date")
+        ])
+        
+        print(f"✅ Успешно обработано {df.height} записей реальных данных COVID-19 с Polars")
+        
+        # Конвертируем в список словарей
+        return df.to_dicts()
         
     except Exception as e:
-        print(f"⚠️ Ошибка загрузки реальных данных: {e}")
+        import traceback
+        print(f"❌ Критическая ошибка при загрузке реальных данных с Polars: {e}")
+        print(traceback.format_exc())
         print("🔄 Переходим на генерацию тестовых данных...")
         return load_covid_sample_data(limit)
 

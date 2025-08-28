@@ -255,7 +255,7 @@ module "airflow" {
   airflow_admin_password = var.airflow_admin_password != "" ? var.airflow_admin_password : var.super_user_password
 
   # Пути к директориям
-  airflow_dags_path    = "${path.root}/../../additional/airflow/dags"
+  airflow_dags_path    = "${path.root}/../../additional/airflow"
   airflow_logs_path    = "${path.root}/logs/airflow"
   airflow_plugins_path = "${path.root}/../../additional/airflow/plugins"
   airflow_config_path  = "${path.root}/../../additional/airflow/config"
