@@ -141,6 +141,9 @@ module "postgres" {
   superset_pg_password = var.superset_pg_password
   superset_pg_db       = var.superset_pg_db
 
+  # ClickHouse network
+  clickhouse_network_name = module.clickhouse_cluster.network_name
+
   depends_on = [module.clickhouse_cluster]
 }
 
