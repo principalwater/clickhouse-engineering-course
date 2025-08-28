@@ -7,12 +7,9 @@
 - [Используемые данные](#используемые-данные)
 - [Архитектура решения](#архитектура-решения)
 - [Этап 1: Реализация модуля bi-tools](#этап-1-реализация-модуля-bi-tools)
-- [Этап 2: Подключение к ClickHouse](#этап-2-подключение-к-clickhouse)
-- [Этап 3: Создание дашборда с 5 визуализациями](#этап-3-создание-дашборда-с-5-визуализациями)
-- [Этап 4: Экспорт дашборда для импорта](#этап-4-экспорт-дашборда-для-импорта)
-- [Проверка результатов](#проверка-результатов)
-- [Компетенции](#компетенции)
-- [Результат](#результат)
+- [Этап 2: Создание Kafka топика и ClickHouse таблиц](#этап-2-создание-kafka-топика-и-clickhouse-таблиц)
+- [Этап 3: Подключение к ClickHouse](#этап-3-подключение-к-clickhouse)
+- [Этап 4: Создание дашборда с 5 визуализациями](#этап-4-создание-дашборда-с-5-визуализациями)
 
 ---
 
@@ -35,7 +32,7 @@
 
 Однако, начиная с [Homework #13: Storage Policy & Backup](../hw13_storage-policy-backup/README.md), был реализован модульный пайплайн в [base-infra/ch_with_storage](../base-infra/ch_with_storage/), и принято решение встроить в него соответствующий модуль bi-tools для более согласованной архитектуры.
 
-По заданию нам нужно сделать дашборд в Apache Superset, поэтому, хотя по желанию автора был развернут также Metabase, всё выполнение будет проводиться в Superset в соответствии с заданием.
+По заданию нам нужно сделать дашборд в Apache Superset, поэтому всё выполнение будет проводиться в Superset в соответствии с заданием.
 
 ## Используемые данные
 
@@ -53,7 +50,6 @@
 - **Объем**: 20+ миллиардов записей (1.67 TB несжатых, 310 GiB сжатых)
 - **Содержание**: Данные экологических измерений с посекундной точностью по всему миру
 - **Временной диапазон**: с июня 2019 года по настоящее время
-- **Обновление**: Данные поступают через Kafka топики с периодичностью 1 и 5 минут
 - **Назначение**: Real-time мониторинг экологической обстановки и анализ качества воздуха
 
 ### Выбор Polars для обработки данных
@@ -89,12 +85,12 @@ df = lazy_df.collect()  # Применение всех оптимизаций
 
 ### Архитектура данных в ClickHouse
 
-Данные Environmental Sensors организованы в оптимизированной архитектуре для работы с посекундными временными рядами:
+Данные Environmental Sensors организованы в единой таблице для простоты и удобства анализа.
 
-#### **Структура исходных данных Environmental Sensors**
+#### **Структура таблицы `raw.sensors`**
 ```sql
 sensor_id UInt16,           -- ID сенсора (1-65535)
-sensor_type Enum(...),      -- Тип сенсора (BME280, SDS011, DHT22, PMS5003, etc.)
+sensor_type Enum(\'BME280\', \'BMP180\', \'BMP280\', \'DHT22\', \'DS18B20\', \'HPM\', \'HTU21D\', \'PMS1003\', \'PMS3003\', \'PMS5003\', \'PMS6003\', \'PMS7003\', \'PPD42NS\', \'SDS011\'),
 location UInt32,            -- ID локации сенсора
 lat Float32,                -- Широта (WGS84)
 lon Float32,                -- Долгота (WGS84)  
@@ -106,92 +102,6 @@ temperature Float32,        -- Температура воздуха (°C)
 humidity Float32            -- Относительная влажность (%)
 ```
 
-#### **1. Уровень Kafka Integration (`kafka` schema)**
-
-**Разделение на два оптимизированных топика:**
-
-Учитывая специфику Environmental Sensors данных, было принято решение разделить поток на два топика с разной частотой обновлений:
-
-- **`kafka.sensors_measurements_kafka`** — Kafka Engine для топика `sensors_measurements_1min`
-  - Высокочастотные данные измерений (температура, влажность, качество воздуха)
-  - Обновляются каждую минуту для near real-time мониторинга
-  
-- **`kafka.sensors_locations_kafka`** — Kafka Engine для топика `sensors_locations_5min`  
-  - Метаданные сенсоров (координаты, типы), изменяющиеся редко
-  - Обновляются каждые 5 минут для экономии ресурсов
-
-Такая архитектура позволяет оптимизировать использование сети и хранилища, при этом сохраняя возможность джойнов по `sensor_id` и `timestamp`.
-
-#### **2. Уровень Raw Data (`raw` schema)**
-
-**Таблица измерений (высокочастотные данные):**
-- **`raw.sensors_measurements_local`** — ReplicatedMergeTree таблица (локальная)
-- **`raw.sensors_measurements`** — Distributed таблица
-- **`raw.sensors_measurements_mv`** — Materialized View (Kafka → Local)
-
-**Структура измерений:**
-```sql
-timestamp DateTime,         -- Время измерения (YYYY-MM-DD HH:MM:SS)
-sensor_id UInt16,           -- ID сенсора для джойна
-temperature Float32,        -- Температура воздуха (°C)
-humidity Float32,           -- Влажность (%)
-pressure Float32,           -- Давление (гПа)
-P1 Float32,                 -- PM1.0 (мкг/м³)
-P2 Float32                  -- PM2.5 (мкг/м³)
-```
-
-#### **3. Уровень ODS - Operational Data Store (`ods` schema)**
-
-**Таблица метаданных сенсоров (низкочастотные данные):**
-- **`ods.sensors_locations_local`** — ReplicatedMergeTree таблица (локальная)  
-- **`ods.sensors_locations`** — Distributed таблица
-- **`ods.sensors_locations_mv`** — Materialized View (Kafka → Local)
-
-**Структура метаданных:**
-```sql
-timestamp DateTime,         -- Время обновления метаданных
-sensor_id UInt16,           -- ID сенсора для джойна
-sensor_type String,         -- Тип сенсора (BME280, SDS011, etc.)
-location UInt32,            -- ID локации
-lat Float32,                -- Широта (WGS84)
-lon Float32                 -- Долгота (WGS84)
-```
-
-### Используемые таблицы в дашборде
-
-Для визуализаций используются **Distributed таблицы** с возможностью джойнов по `sensor_id` и `timestamp`:
-
-1. **`raw.sensors_measurements`** — для анализа измерений в реальном времени (температура, влажность, качество воздуха)
-2. **`ods.sensors_locations`** — для геопространственного анализа и фильтрации по типам сенсоров
-
-**Пример джойна для полноценного анализа:**
-```sql
-SELECT 
-    m.timestamp,
-    l.sensor_type,
-    l.lat, l.lon,
-    m.temperature,
-    m.P2 as pm25_concentration
-FROM raw.sensors_measurements m
-JOIN ods.sensors_locations l ON (
-    m.sensor_id = l.sensor_id 
-    AND m.timestamp BETWEEN l.timestamp - INTERVAL 5 MINUTE 
-                         AND l.timestamp + INTERVAL 5 MINUTE
-)
-WHERE m.timestamp >= now() - INTERVAL 1 HOUR
-ORDER BY m.timestamp DESC
-```
-
-### Потоковая обработка данных
-
-- **Периодичность поступления**: 
-  - Измерения: каждую минуту (10 сообщений за батч)
-  - Метаданные сенсоров: каждые 5 минут (5 сообщений за батч)
-- **Real-time обновление**: Данные в дашборде обновляются в режиме реального времени через Materialized Views
-- **Географический охват**: Глобальная сеть сенсоров с фильтрацией по регионам и типам сенсоров
-- **Временная точность**: Посекундные измерения для near real-time мониторинга
-- **Оптимизированная производительность**: Polars обеспечивает обработку до 232 записей/сек
-
 ---
 
 ## Архитектура решения
@@ -200,274 +110,219 @@ ORDER BY m.timestamp DESC
 
 ```mermaid
 graph TB
-    subgraph "Terraform Main Pipeline"
-        A[main.tf] --> B[module.postgres]
-        A --> C[module.bi_tools]
-        A --> D[module.clickhouse_cluster]
+    subgraph "Data Sources Layer"
+        DS1[S3 Environmental Sensors Dataset<br/>20+ billion records<br/>.zst compressed]
+        DS1 --> ETL[Airflow ETL Pipeline<br/>sensors_pipeline DAG<br/>Polars processing]
     end
     
-    subgraph "BI Tools Module"
-        C --> E[PostgreSQL Integration]
-        C --> F[Metabase Container]
-        C --> G[Superset Container]
-        C --> H[Configuration Generation]
+    subgraph "Terraform Infrastructure (IaC)"
+        TF[main.tf] --> MOD1[module.postgres]
+        TF --> MOD2[module.clickhouse_cluster] 
+        TF --> MOD3[module.kafka]
+        TF --> MOD4[module.airflow]
+        TF --> MOD5[module.bi_tools]
     end
     
-    subgraph "PostgreSQL Layer"
-        B --> I[postgres container]
-        E --> J[metabase_db]
-        E --> K[superset_db] 
-        E --> L[airflow_db]
-        I --> J
-        I --> K
-        I --> L
+    subgraph "Streaming Data Pipeline"
+        ETL --> KT[Kafka Topic: sensors<br/>Partitions: 3<br/>LZ4 compression]
+        KT --> KE[ClickHouse Kafka Engine<br/>otus_kafka.sensors_kafka]
+        KE --> MV[Materialized View<br/>raw.sensors_mv]
+        MV --> LT[Local Tables<br/>raw.sensors_local<br/>ReplicatedMergeTree]
+        LT --> DT[Distributed Table<br/>raw.sensors]
     end
     
-    subgraph "Configuration & Secrets"
-        H --> M[superset_config.py.tmpl]
-        H --> N[Secret Key Generation]
-        H --> O[User Management]
+    subgraph "ClickHouse Cluster Architecture"
+        MOD2 --> CH1[clickhouse-01<br/>Shard 1 Replica 1]
+        MOD2 --> CH2[clickhouse-02<br/>Shard 1 Replica 2]
+        MOD2 --> KP[clickhouse-keeper<br/>Coordination Service]
+        CH1 --> KP
+        CH2 --> KP
+        LT --> CH1
+        LT --> CH2
     end
     
-    subgraph "ClickHouse Integration"
-        G --> P[ClickHouse Drivers]
-        P --> Q[clickhouse-connect]
-        P --> R[clickhouse-driver]
-        D --> S[ClickHouse Cluster]
-        Q --> S
-        R --> S
+    subgraph "PostgreSQL Metadata Layer"
+        MOD1 --> PG[PostgreSQL Container<br/>Metadata Storage]
+        PG --> PGDB1[superset_db<br/>Superset metadata]
+        PG --> PGDB2[metabase_db<br/>Metabase metadata]
+        PG --> PGDB3[airflow_db<br/>Airflow metadata]
     end
     
-    subgraph "Network & Service Discovery"
-        T[Docker Network] --> F
-        T --> G
-        T --> I
-        T --> S
+    subgraph "BI Tools Layer"
+        MOD5 --> SS[Apache Superset<br/>:8088<br/>BI Analytics & Dashboards]
+        MOD5 --> MB[Metabase<br/>:3000<br/>Alternative BI Tool]
+        PGDB1 --> SS
+        PGDB2 --> MB
     end
     
-    subgraph "Data Sources"
-        S --> U[sensors_measurements_1min_distributed]
-        S --> V[sensors_locations_5min_distributed]
-        U --> W[Dashboard Visualizations]
-        V --> W
+    subgraph "Analytics & Visualizations"
+        DT --> SS
+        SS --> VIZ1[Time Series Chart<br/>PM2.5 Dynamics]
+        SS --> VIZ2[Geographic Map<br/>Sensor Distribution]
+        SS --> VIZ3[Sunburst Chart<br/>Sensor Types Analysis]
+        SS --> VIZ4[Correlation Heatmap<br/>Parameter Relations]
+        SS --> VIZ5[Hourly Patterns<br/>Daily Pollution Cycles]
     end
+    
+    subgraph "Orchestration Layer"
+        MOD4 --> AF[Apache Airflow<br/>:8080<br/>ETL Orchestration]
+        AF --> DAG1[kafka_topic_create<br/>Topic Management]
+        AF --> DAG2[kafka_to_ch_table_create<br/>Table Creation]
+        AF --> DAG3[sensors_pipeline<br/>Data Processing]
+        DAG1 --> KT
+        DAG2 --> KE
+        DAG3 --> ETL
+    end
+    
+    subgraph "Network & Configuration"
+        NET[Docker Network<br/>clickhouse-net] 
+        NET --> CH1
+        NET --> CH2
+        NET --> PG
+        NET --> SS
+        NET --> MB
+        NET --> AF
+        NET --> KT
+        
+        CONFIG[Automated Configuration<br/>- User Management<br/>- Database Connections<br/>- Security Settings]
+        CONFIG --> SS
+        CONFIG --> MB
+    end
+    
+    style DS1 fill:#e1f5fe
+    style SS fill:#f3e5f5
+    style MB fill:#f3e5f5
+    style CH1 fill:#e8f5e8
+    style CH2 fill:#e8f5e8
+    style KT fill:#fff3e0
+    style DT fill:#e8f5e8
+    style VIZ1 fill:#fce4ec
+    style VIZ2 fill:#fce4ec
+    style VIZ3 fill:#fce4ec
+    style VIZ4 fill:#fce4ec
+    style VIZ5 fill:#fce4ec
 ```
-
-### Последовательность развертывания
-
-#### 1. **Инициализация инфраструктуры**
-```mermaid
-sequenceDiagram
-    participant TF as Terraform
-    participant PG as PostgreSQL Module  
-    participant BI as BI-Tools Module
-    participant CH as ClickHouse Module
-    
-    TF->>+PG: Deploy PostgreSQL container
-    PG->>PG: Create docker network
-    PG->>PG: Initialize postgres databases
-    PG-->>-TF: PostgreSQL ready
-    
-    TF->>+CH: Deploy ClickHouse cluster
-    CH->>CH: Create ClickHouse containers
-    CH->>CH: Configure cluster settings
-    CH-->>-TF: ClickHouse cluster ready
-    
-    TF->>+BI: Deploy BI tools (depends_on: postgres)
-    BI->>BI: Check service enable flags
-    BI-->>-TF: BI module initialization ready
-```
-
-#### 2. **Настройка баз данных**
-```mermaid
-sequenceDiagram
-    participant BI as BI-Tools Module
-    participant PG as PostgreSQL Container
-    participant MB as Metabase
-    participant SS as Superset
-    
-    BI->>+PG: Check PostgreSQL readiness
-    PG-->>-BI: pg_isready confirmed
-    
-    BI->>+PG: Create metabase user & database
-    PG->>PG: CREATE USER metabase
-    PG->>PG: CREATE DATABASE metabaseappdb
-    PG->>PG: GRANT permissions
-    PG-->>-BI: Metabase DB ready
-    
-    BI->>+PG: Create superset user & database  
-    PG->>PG: CREATE USER superset
-    PG->>PG: CREATE DATABASE superset
-    PG->>PG: GRANT permissions
-    PG-->>-BI: Superset DB ready
-```
-
-#### 3. **Генерация конфигураций**
-```mermaid
-sequenceDiagram
-    participant BI as BI-Tools Module
-    participant TF as Terraform
-    participant FS as File System
-    
-    BI->>+TF: Process superset_config.py.tmpl
-    TF->>TF: templatefile() with secret_key
-    TF->>+FS: Write env/superset_config.py
-    FS-->>-TF: Configuration file created
-    TF-->>-BI: Configuration ready
-    
-    BI->>BI: Generate user lists from locals
-    BI->>BI: Apply fallback logic for credentials
-```
-
-#### 4. **Развертывание контейнеров**
-```mermaid
-sequenceDiagram
-    participant BI as BI-Tools Module
-    participant Docker as Docker Engine
-    participant MB as Metabase Container
-    participant SS as Superset Container
-    
-    BI->>+Docker: Pull metabase image
-    Docker-->>-BI: Image ready
-    
-    BI->>+Docker: Deploy Metabase container
-    Docker->>MB: Start container with PG connection
-    MB->>MB: Health check (curl /api/health)
-    MB-->>-BI: Metabase healthy
-    
-    BI->>+Docker: Pull superset image  
-    Docker-->>-BI: Image ready
-    
-    BI->>+Docker: Deploy Superset container
-    Docker->>SS: Start with config volume mount
-    SS->>SS: Health check (curl /health)
-    SS-->>-BI: Superset healthy
-```
-
-#### 5. **Установка драйверов и инициализация**
-```mermaid
-sequenceDiagram
-    participant BI as BI-Tools Module
-    participant SS as Superset Container
-    participant CH as ClickHouse
-    
-    BI->>+SS: Install ClickHouse drivers
-    SS->>SS: pip install clickhouse-connect
-    SS->>SS: pip install clickhouse-driver
-    SS-->>-BI: Drivers installed
-    
-    BI->>+SS: Restart container
-    SS->>SS: Reload with new libraries
-    SS-->>-BI: Container restarted
-    
-    BI->>+SS: Initialize Superset
-    SS->>SS: superset db upgrade
-    SS->>SS: superset init
-    SS->>SS: superset fab create-admin
-    SS-->>-BI: Admin user created
-    
-    BI->>+SS: Test ClickHouse connection
-    SS->>+CH: SELECT 1
-    CH-->>-SS: Connection OK
-    SS-->>-BI: ClickHouse integration ready
-```
-
-#### 6. **API автоматизация пользователей**
-```mermaid
-sequenceDiagram
-    participant BI as BI-Tools Module
-    participant MB as Metabase
-    participant SS as Superset
-    
-    BI->>+MB: Wait for API readiness
-    MB-->>-BI: /api/health status=ok
-    
-    BI->>+MB: Setup or login via API
-    MB->>MB: Create session token
-    MB-->>-BI: Session established
-    
-    BI->>+MB: Create additional users
-    MB->>MB: POST /api/user for each user
-    MB-->>-BI: Users created
-    
-    BI->>+SS: Create regular users via CLI
-    SS->>SS: superset fab create-user
-    SS-->>-BI: Users created
-```
-
-### Ключевые особенности архитектуры
-
-#### **Модульность и переиспользование**
-- Модуль `bi-tools` переиспользует существующий PostgreSQL из модуля `postgres`
-- Общая Docker-сеть обеспечивает связность между сервисами
-- Конфигурации генерируются динамически через Terraform templates
-
-#### **Безопасность**
-- Секретные ключи передаются через переменные Terraform
-- Пароли БД управляются централизованно через fallback-логику
-- Конфигурационные файлы монтируются в контейнеры как read-only
-
-#### **Автоматизация**
-- Полная автоматизация через `null_resource` provisioners
-- API-инициализация пользователей без ручного вмешательства
-- Health checks обеспечивают корректный порядок запуска
-
-#### **Расширяемость**
-- Поддержка нескольких BI-инструментов через feature flags
-- Легкое добавление новых пользователей через переменные
-- Модульная архитектура позволяет независимое масштабирование
 
 ---
 
 ## Этап 1: Реализация модуля bi-tools
 
-### 1.1 Создание модульной архитектуры
+### 1.1 Описание модуля bi-tools
 
-Создан модуль `bi-tools` в структуре:
+Модуль `bi-tools` реализован в [base-infra/ch_with_storage/modules/bi-tools/](../base-infra/ch_with_storage/modules/bi-tools/) и предназначен для развертывания инструментов бизнес-аналитики (Apache Superset и Metabase) в составе единой инфраструктуры с ClickHouse кластером.
+
+**Ключевые компоненты модуля:**
+- **Apache Superset** - основной BI-инструмент для создания дашбордов и визуализаций
+- **Metabase** - альтернативный BI-инструмент для анализа данных
+- **PostgreSQL интеграция** - использование существующего PostgreSQL для хранения метаданных BI-инструментов
+- **Автоматическая конфигурация** - создание пользователей, баз данных и настроек подключений
+
+### 1.2 Команды для развертывания инфраструктуры
+
+Для развертывания полной инфраструктуры с ClickHouse кластером, Airflow, Kafka и BI-инструментами выполните следующие команды:
+
+#### Шаг 1: Переход в директорию Terraform проекта
+```bash
+cd base-infra/ch_with_storage/
 ```
-base-infra/ch_with_storage/modules/bi-tools/
-├── main.tf
-├── variables.tf
-├── locals.tf
-├── outputs.tf
-└── samples/
-    └── superset_config.py.tmpl
+
+#### Шаг 2: Настройка переменных окружения
+Перед развертыванием необходимо активировать требуемые модули в файле `terraform.tfvars`:
+
+```hcl
+# Обязательные модули для BI-интеграции
+enable_postgres = true
+enable_clickhouse_cluster = true
+enable_airflow = true
+enable_kafka = true
+enable_bi_tools = true
+
+# Опциональные модули
+enable_monitoring = false
+enable_backup = false
 ```
 
-### 1.2 Ключевые особенности модуля
+**Пояснение флагов:**
+- `enable_postgres = true` - PostgreSQL для метаданных BI-инструментов, Airflow
+- `enable_clickhouse_cluster = true` - ClickHouse кластер для хранения данных
+- `enable_airflow = true` - Apache Airflow для оркестрации ETL процессов
+- `enable_kafka = true` - Apache Kafka для потоковой обработки данных  
+- `enable_bi_tools = true` - Apache Superset и Metabase для визуализации
 
-- **Переиспользование PostgreSQL**: Модуль использует существующий модуль [`postgres`](../base-infra/ch_with_storage/modules/postgres/), что обеспечивает согласованность с другими сервисами (Airflow)
-- **Двухуровневая система флагов**: 
-  - `enable_bi_tools` — master switch для всего модуля
-  - `enable_metabase/enable_superset` — тонкая настройка отдельных сервисов внутри модуля
-- **Поддержка обоих BI-инструментов**: Superset и Metabase развертываются опционально через флаги
-- **Автоматическая инициализация**: Создание пользователей и настройка через API
-- **Интеграция с ClickHouse**: Автоматическая установка драйверов ClickHouse в Superset
+#### Шаг 3: Инициализация Terraform
+```bash
+terraform init
+```
 
-### 1.3 Интеграция в основной пайплайн
+#### Шаг 4: Планирование развертывания
+```bash
+terraform plan
+```
+Команда покажет план изменений и ресурсы, которые будут созданы:
+- **module.postgres** - PostgreSQL контейнер для метаданных
+- **module.clickhouse_cluster** - ClickHouse кластер (2 ноды + Keeper)
+- **module.airflow** - Apache Airflow для оркестрации ETL процессов  
+- **module.kafka** - Apache Kafka для потоковой обработки данных
+- **module.bi_tools** - Apache Superset и Metabase
 
-Модуль `bi-tools` интегрирован в основную инфраструктуру через стандартные механизмы Terraform:
+#### Шаг 5: Применение конфигурации
+```bash
+terraform apply -auto-approve
+```
+Подтвердите выполнение, введя `yes` при запросе.
 
-- **Конфигурационные переменные**: Добавлены в [`variables.tf`](../base-infra/ch_with_storage/variables.tf#L400-L411) для управления флагами и секретными ключами
-- **Модульная интеграция**: Подключен в [`main.tf`](../base-infra/ch_with_storage/main.tf#L294-L325) с зависимостью от модуля PostgreSQL
-- **Условное развертывание**: Использует `count` для активации только при `enable_bi_tools = true`
-- **Передача параметров**: Наследует учетные данные и сетевые настройки от родительского модуля
+#### Шаг 6: Проверка статуса развертывания
+После завершения развертывания проверьте статус всех сервисов:
 
-Полная реализация модуля доступна по ссылке: [`modules/bi-tools/`](../base-infra/ch_with_storage/modules/bi-tools/)
+```bash
+# Проверка статуса контейнеров из стэка clickhouse-engineering-course
+docker ps --filter "label=com.docker.compose.project=clickhouse-engineering-course" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
 
-**Результат деплоя модуля bi-tools:**
-<img src="../screenshots/hw18_bi-integration/01_bi_tools_module_integration.png" width="600" alt="Деплой bi-tools">
+# Проверка доступности Superset
+curl -s -o /dev/null -w "%{http_code}" http://localhost:8088/health
+```
+
+### 1.3 Доступные сервисы после развертывания
+
+После успешного развертывания будут доступны следующие сервисы:
+
+| Сервис | URL | Порт | Логин/Пароль |
+|--------|-----|------|--------------|
+| **Apache Superset** | http://localhost:8088 | 8088 | admin/admin |
+| **Metabase** | http://localhost:3000 | 3000 | admin@example.com/password |
+| **Apache Airflow** | http://localhost:8080 | 8080 | admin/admin |
+| **ClickHouse HTTP** | http://localhost:8123 | 8123 | bi_user/password |
+| **ClickHouse Native** | clickhouse://localhost:9000 | 9000 | bi_user/password |
+
+### Результат развертывания инфраструктуры
+
+<img src="../screenshots/hw18_bi-integration/01_terraform_apply_result.png" width="800" alt="Результат развертывания инфраструктуры через Terraform">
 
 ---
 
-## Этап 2: Создание Kafka топиков и ClickHouse таблиц
+## Этап 2: Создание Kafka топика и ClickHouse таблиц
 
-### 2.1 Создание Kafka топика через DAG
+### 2.1 Создание Kafka топика `sensors`
 
-Используем автоматизированный DAG `kafka_topic_create` для создания единого топика `sensors` с полной схемой.
+#### 2.1.1 Описание топика sensors
 
-1. Открываем Airflow UI: `http://localhost:8080`
-2. Находим DAG `kafka_topic_create` и нажимаем "Trigger DAG"
+Топик `sensors` предназначен для потоковой передачи данных от экологических сенсоров. Этот топик объединяет все типы измерений от различных датчиков в единый поток данных для последующей обработки в ClickHouse.
+
+**Характеристики топика:**
+- **Назначение**: Прием данных от глобальной сети экологических сенсоров Sensor.Community
+- **Типы данных**: Температура, влажность, давление, концентрация PM1.0/PM2.5, геолокация
+- **Частота обновления**: Near real-time поступление данных с посекундной точностью
+- **Компрессия**: LZ4 для оптимизации сетевого трафика
+- **Retention**: 7 дней (604800000 мс) для обеспечения отказоустойчивости
+
+#### 2.1.2 Создание топика через DAG
+
+Используем автоматизированный DAG `kafka_topic_create` для создания единого топика `sensors`.
+
+**Шаги выполнения:**
+
+1. Откройте Airflow UI: `http://localhost:8080`
+2. Найдите DAG `kafka_topic_create` и нажмите "Trigger DAG"
 3. В поле "Advanced Options" → "Configuration JSON" вставляем:
 
 ```json
@@ -487,15 +342,42 @@ base-infra/ch_with_storage/modules/bi-tools/
 }
 ```
 
-**Результат создания топика sensors:**
-<img src="../screenshots/hw18_bi-integration/03_kafka_topic_locations_creation.png" width="1000" alt="Создание топика sensors">
+**Пояснение конфигурации:**
+- `partitions: 3` - обеспечивает параллельную обработку данных
+- `retention.ms: 604800000` - хранение данных в топике в течение 7 дней
+- `compression.type: "lz4"` - быстрая компрессия для high-throughput сценариев
+- `segment.ms: 300000` - ротация сегментов каждые 5 минут для лучшей производительности
+- `recreate_topic: true` - пересоздание топика при повторном запуске
 
-### 2.2 Создание ClickHouse таблиц через DAG
+#### Результат создания топика sensors
 
-Используем DAG `kafka_to_ch_table_create` для автоматического создания полной архитектуры таблиц.
+<img src="../screenshots/hw18_bi-integration/02_kafka_topic_sensors_creation.png" width="1000" alt="Создание Kafka топика sensors через Airflow DAG">
 
-#### Таблица измерений (ReplicatedMergeTree)
-1. Запускаем DAG `kafka_to_ch_table_create`
+<p><i>На скриншоте показан успешный процесс создания топика `sensors` с заданными параметрами конфигурации через DAG `kafka_topic_create`.</i></p>
+
+### 2.2 Создание таблицы `raw.sensors` в ClickHouse
+
+#### 2.2.1 Описание архитектуры таблиц sensors
+
+DAG `kafka_to_ch_table_create` создает полный пайплайн для обработки данных от Kafka до конечных таблиц ClickHouse:
+
+**Компоненты пайплайна:**
+1. **Kafka Engine таблица** (`otus_kafka.sensors_kafka`) - точка приема данных из Kafka топика
+2. **Materialized View** (`raw.sensors_mv`) - автоматическое преобразование и перенос данных
+3. **Local таблица** (`raw.sensors_local`) - хранение данных на ReplicatedMergeTree движке
+4. **Distributed таблица** (`raw.sensors`) - распределенный доступ к данным кластера
+
+**Оптимизации:**
+- **Партиционирование**: по дням (`toYYYYMMDD(timestamp)`) для эффективного pruning
+- **Индексы**: на ключевые поля (sensor_id, timestamp, sensor_type, location) для быстрого поиска
+- **Проекции**: дополнительная сортировка по sensor_id для аналитических запросов
+- **Шардинг**: распределение по sensor_id для равномерной нагрузки
+
+#### 2.2.2 Создание таблиц через DAG
+
+**Шаги выполнения:**
+
+1. Запускаем DAG `kafka_to_ch_table_create` в Airflow UI
 2. В "Configuration JSON" вставляем:
 
 ```json
@@ -525,7 +407,7 @@ base-infra/ch_with_storage/modules/bi-tools/
     "location": "UInt32",
     "lat": "Float32",
     "lon": "Float32",
-    "timestamp": "DateTime",
+    "timestamp": "String",
     "P1": "Float32",
     "P2": "Float32",
     "P0": "Float32",
@@ -542,643 +424,757 @@ base-infra/ch_with_storage/modules/bi-tools/
 }
 ```
 
-**Результат создания таблицы sensors:**
-<img src="../screenshots/hw18_bi-integration/05_ch_table_sensors_creation.png" width="1000" alt="Создание таблиц sensors">
+**Пояснение ключевых параметров:**
+- `dwh_layer: "raw"` - создание таблиц в слое raw (необработанные данные)
+- `sort_key: "timestamp, sensor_id"` - первичная сортировка для оптимизации временных запросов
+- `partition_key: "toYYYYMMDD(timestamp)"` - партиционирование по дням для partition pruning
+- `shard_key: "xxHash64(sensor_id)"` - распределение данных по нодам кластера
+- `create_projection: true` - создание проекции для альтернативной сортировки
+- `recreate_tables: true` - пересоздание всех таблиц при повторном запуске
 
-DAG автоматически создаст:
-- **Kafka Engine таблицы** для чтения из топиков
-- **ReplicatedMergeTree локальные таблицы** для хранения данных  
-- **Materialized View** для перекачки данных из Kafka в локальные таблицы
-- **Distributed таблицы** для доступа ко всему кластеру
-- **Проекции и индексы** для оптимизации запросов
+#### 2.2.3 Структура создаваемых таблиц
+
+**Таблицы, создаваемые DAG:**
+
+| Таблица | Назначение | Движок | Описание |
+|---------|------------|--------|-----------|
+| `otus_kafka.sensors_kafka` | Прием данных | Kafka | Чтение из Kafka топика |
+| `raw.sensors_local` | Хранение данных | ReplicatedMergeTree | Локальное хранилище на каждой ноде |
+| `raw.sensors` | Доступ к данным | Distributed | Распределенный доступ ко всему кластеру |
+| `raw.sensors_mv` | Трансформация | Materialized View | Автоматический перенос и обработка данных |
+
+#### Результат создания таблиц sensors
+
+<img src="../screenshots/hw18_bi-integration/03_clickhouse_table_sensors_creation.png" width="1000" alt="Создание ClickHouse таблиц sensors через Airflow DAG">
+
+<p><i>На скриншоте показан успешный процесс создания полного пайплайна таблиц `sensors` с Kafka Engine, Materialized View, локальными и распределенными таблицами через DAG `kafka_to_ch_table_create`.</i></p>
 
 ### 2.3 Проверка структуры таблиц
 
-**Команды для проверки:**
+#### 2.3.1 Команды для проверки структуры таблиц
+
+**Проверка distributed таблицы:**
 ```sql
--- Описание ReplicatedMergeTree таблиц
-DESCRIBE TABLE raw.sensors_measurements_local;
-DESCRIBE TABLE ods.sensors_locations_local;
+-- Информация о движке и настройках
+SHOW CREATE TABLE raw.sensors;
 ```
 
-**Структура ReplicatedMergeTree таблиц:**
-<img src="../screenshots/hw18_bi-integration/06_ch_table_structure_replicated.png" width="800" alt="Структура ReplicatedMergeTree таблиц">
+<img src="../screenshots/hw18_bi-integration/04_sensors_distributed_table_create.png" width="800" alt="Структура и создание распределенной таблицы raw.sensors">
 
+<p><i>На скриншоте показана структура распределенной таблицы `raw.sensors` с полным CREATE TABLE запросом, включая информацию о кластере и target таблицах.</i></p>
+
+**Проверка local таблицы:**
 ```sql
--- Описание Distributed таблиц  
-DESCRIBE TABLE raw.sensors_measurements;
-DESCRIBE TABLE ods.sensors_locations;
+-- Информация о движке и настройках локальной таблицы
+SHOW CREATE TABLE raw.sensors_local;
 ```
 
-**Структура Distributed таблиц:**
-<img src="../screenshots/hw18_bi-integration/07_ch_table_structure_distributed.png" width="800" alt="Структура Distributed таблиц">
+<img src="../screenshots/hw18_bi-integration/05_sensors_local_table_create.png" width="800" alt="Структура и создание локальной таблицы raw.sensors_local">
+
+<p><i>На скриншоте показана структура локальной таблицы `raw.sensors_local` на движке ReplicatedMergeTree с информацией о партиционировании, сортировке, проекциях и индексах.</i></p>
+
+**Проверка Kafka Engine таблицы:**
+```sql
+-- Информация о настройках Kafka Engine
+SHOW CREATE TABLE otus_kafka.sensors_kafka;
+```
+
+<img src="../screenshots/hw18_bi-integration/06_sensors_kafka_table_create.png" width="800" alt="Структура Kafka Engine таблицы sensors_kafka">
+
+<p><i>На скриншоте показана структура Kafka Engine таблицы `otus_kafka.sensors_kafka` с настройками подключения к Kafka брокеру, топику и форматом данных JSON.</i></p>
+
+**Проверка Materialized View:**
+```sql
+-- Информация о Materialized View
+SHOW CREATE TABLE raw.sensors_mv;
+```
+
+<img src="../screenshots/hw18_bi-integration/07_sensors_materialized_view.png" width="800" alt="Materialized View raw.sensors_mv">
+
+<p><i>На скриншоте показано определение Materialized View `raw.sensors_mv` с логикой преобразования данных из Kafka Engine таблицы в локальную таблицу, включая parseDateTimeBestEffort для поля timestamp.</i></p>
+
+```sql
+-- Статус выполнения Materialized View
+SELECT * FROM system.query_log 
+WHERE query LIKE '%sensors_mv%' 
+ORDER BY event_time DESC 
+LIMIT 1;
+```
+
+<img src="../screenshots/hw18_bi-integration/08_sensors_mv_query_log.png" width="800" alt="Логи выполнения Materialized View sensors_mv">
+
+<p><i>На скриншоте показаны последние записи из system.query_log, связанные с работой Materialized View `sensors_mv`, включая статус выполнения, время и потребленные ресурсы.</i></p>
 
 ### 2.4 Запуск продьюсера данных
 
-После создания таблиц необходимо запустить DAG для заполнения Kafka топика данными из S3.
+#### 2.4.1 Описание пайплайна sensors_pipeline
 
-#### Запуск пайплайна sensors_pipeline
+После создания таблиц необходимо запустить DAG `sensors_pipeline` для заполнения Kafka топика данными Environmental Sensors Dataset из S3. Этот пайплайн реализует полный ETL процесс для потоковой передачи экологических данных.
+
+**Архитектура пайплайна:**
+1. **Загрузка данных из S3** - чтение сжатых файлов .zst из публичного S3 bucket
+2. **Обработка через Polars** - быстрая фильтрация и трансформация данных с использованием lazy evaluation
+3. **Отправка в Kafka** - батчевая публикация JSON сообщений в топик `sensors`
+4. **Мониторинг прогресса** - логирование статистики обработки и метрик производительности
+
+**Ключевые особенности пайплайна:**
+- **Производительность**: Обработка до 232 записи/сек с использованием Polars
+- **Надежность**: Автоматический retry при сбоях, транзакционная отправка сообщений
+- **Масштабируемость**: Настраиваемый размер батчей и количество файлов за запуск
+- **Мониторинг**: Детальное логирование прогресса и метрик обработки
+
+#### 2.4.2 Запуск пайплайна sensors_pipeline
+
+**Шаги выполнения:**
 
 1. Откройте Airflow UI: `http://localhost:8080`
-2. Найдите DAG `sensors_pipeline`
+2. Найдите DAG `sensors_pipeline` в списке DAG'ов
 3. Включите DAG, переключив toggle в позицию ON
-4. Нажмите "Trigger DAG" для первого запуска. Вы можете указать параметры в "Configuration JSON", например:
+4. Нажмите "Trigger DAG" для первого запуска
 
+**Рекомендуемая конфигурация для запуска:**
 ```json
 {
   "use_real_data": true,
   "batch_size": 5000,
-  "max_files_per_run": 5
+  "max_files_per_run": 5,
+  "sensor_types_filter": ["BME280", "DHT22", "SDS011", "PMS5003"],
+  "time_range_hours": 24,
+  "enable_detailed_logging": true
 }
 ```
 
-**Результат запуска продьюсера `sensors_pipeline`:**
-<img src="../screenshots/hw18_bi-integration/10_producers_monitoring.png" width="1000" alt="Мониторинг продьюсера">
+**Пояснение параметров:**
+- `use_real_data: true` - использование реальных данных вместо mock данных
+- `batch_size: 5000` - размер батча для отправки в Kafka (оптимальный для производительности)
+- `max_files_per_run: 5` - ограничение количества обрабатываемых файлов за один запуск
+- `sensor_types_filter` - фильтрация по типам сенсоров (наиболее распространенные типы)
+- `time_range_hours: 24` - временной диапазон данных за последние 24 часа
+- `enable_detailed_logging: true` - включение детального логирования для отладки
 
-DAG `sensors_pipeline` будет выполняться каждый час, инкрементально загружая новые данные из S3, используя watermark, хранящийся в Airflow Variables. Параметр `max_files_per_run` ограничивает количество обрабатываемых файлов за один запуск для предотвращения чрезмерного потребления ресурсов.
+#### 2.4.3 Мониторинг процесса загрузки данных
+
+**Проверка статуса DAG в реальном времени:**
+
+<img src="../screenshots/hw18_bi-integration/09_01_sensors_pipeline_execution.png" width="1000" alt="Выполнение DAG sensors_pipeline в Airflow">
+
+<img src="../screenshots/hw18_bi-integration/09_02_sensors_pipeline_execution.png" width="1000" alt="Выполнение DAG sensors_pipeline в Airflow">
+
+<img src="../screenshots/hw18_bi-integration/09_03_sensors_pipeline_execution.png" width="1000" alt="Выполнение DAG sensors_pipeline в Airflow">
+
+**Контроль качества данных:**
+```bash
+# Подсчет сообщений в топике Kafka
+docker exec kafka kafka-run-class kafka.tools.GetOffsetShell \
+  --broker-list localhost:9092 \
+  --topic sensors
+
+# Просмотр примера сообщений
+docker exec kafka kafka-console-consumer \
+  --bootstrap-server kafka:9092 \
+  --topic sensors \
+  --from-beginning --max-messages 3 \
+  --formatter kafka.tools.DefaultMessageFormatter \
+  --property print.value=true \
+  --property value.deserializer=org.apache.kafka.common.serialization.StringDeserializer
+```
+
+#### Результат запуска продьюсера sensors_pipeline
+
+<img src="../screenshots/hw18_bi-integration/09_04_sensors_pipeline_execution.png" width="1000" alt="Выполнение DAG sensors_pipeline в Airflow">
+
+<p><i>На скриншоте показан процесс выполнения DAG `sensors_pipeline` с детализацией по задачам: загрузка данных из S3, обработка через Polars, отправка в Kafka топик и валидация результатов.</i></p>
 
 ### 2.5 Проверка данных
 
-#### Данные в Kafka топиках
+#### 2.5.1 Данные в Kafka топике
+
+**Команды для проверки:**
 ```bash
 # Проверяем доступные топики
 docker exec kafka kafka-topics --list --bootstrap-server localhost:9092
 
-# Проверяем измерения
-docker exec kafka kafka-console-consumer \
-  --bootstrap-server kafka:9092 \
-  --topic sensors_measurements_1min \
-  --from-beginning --max-messages 5
+# Информация о топике sensors
+docker exec kafka kafka-topics --describe \
+  --topic sensors \
+  --bootstrap-server localhost:9092
 
-# Проверяем метаданные
+# Проверяем данные в топике
 docker exec kafka kafka-console-consumer \
   --bootstrap-server kafka:9092 \
-  --topic sensors_locations_5min \
-  --from-beginning --max-messages 5
+  --topic sensors \
+  --from-beginning --max-messages 5 \
+  --property print.value=true
 ```
 
-**Данные измерений в Kafka:**
-<img src="../screenshots/hw18_bi-integration/11_kafka_data_measurements.png" width="800" alt="Данные measurements в Kafka">
+<img src="../screenshots/hw18_bi-integration/10_kafka_topic_data_verification.png" width="800" alt="Проверка данных в Kafka топике sensors">
 
-**Данные метаданных в Kafka:**
-<img src="../screenshots/hw18_bi-integration/12_kafka_data_locations.png" width="800" alt="Данные locations в Kafka">
+<p><i>На скриншоте показаны примеры JSON сообщений в топике `sensors` с данными экологических измерений: sensor_id, sensor_type, геолокация, временные метки и показания сенсоров (температура, влажность, PM1.0/PM2.5).</i></p>
 
-#### Данные в ClickHouse Distributed таблицах
+#### 2.5.2 Данные в ClickHouse
+
+**Команды для проверки:**
 ```sql
--- Проверка измерений
+-- Общая статистика по данным
 SELECT 
-    timestamp,
-    sensor_id,
-    temperature, 
-    humidity,
-    P2 as pm25
-FROM raw.sensors_measurements
-ORDER BY timestamp DESC
-LIMIT 10;
+    count(*) as total_records,
+    min(timestamp) as earliest_record,
+    max(timestamp) as latest_record,
+    count(DISTINCT sensor_id) as unique_sensors,
+    count(DISTINCT sensor_type) as sensor_types
+FROM raw.sensors;
 
--- Проверка метаданных
+-- Распределение данных по типам сенсоров
 SELECT 
-    timestamp,
-    sensor_id,
     sensor_type,
-    lat, lon
-FROM ods.sensors_locations  
-ORDER BY timestamp DESC
-LIMIT 10;
+    count(*) as records_count,
+    avg(temperature) as avg_temp,
+    avg(humidity) as avg_humidity,
+    avg(P2) as avg_pm25
+FROM raw.sensors 
+GROUP BY sensor_type
+ORDER BY records_count DESC;
+```
 
--- Джойн для полной картины
-SELECT 
-    m.timestamp,
-    l.sensor_type,
-    l.lat, l.lon,
-    m.temperature,
-    m.P2 as pm25_concentration
-FROM raw.sensors_measurements m
-JOIN ods.sensors_locations l ON (
-    m.sensor_id = l.sensor_id
-    AND m.timestamp BETWEEN l.timestamp - INTERVAL 5 MINUTE 
-                         AND l.timestamp + INTERVAL 5 MINUTE
-)
-ORDER BY m.timestamp DESC
+<img src="../screenshots/hw18_bi-integration/11_01_clickhouse_data_verification.png" width="800" alt="Проверка данных в ClickHouse таблице raw.sensors">
+
+```sql
+-- Проверка последних данных
+SELECT *
+FROM raw.sensors
+ORDER BY timestamp DESC
 LIMIT 10;
 ```
 
-**Сравнение данных Kafka vs ClickHouse:**
-<img src="../screenshots/hw18_bi-integration/13_kafka_vs_clickhouse_data.png" width="800" alt="Сравнение данных Kafka vs ClickHouse">
-
----
+<img src="../screenshots/hw18_bi-integration/11_02_clickhouse_data_verification.png" width="800" alt="Проверка данных в ClickHouse таблице raw.sensors">
 
 ## Этап 3: Подключение к ClickHouse
 
-### 3.1 Настройка драйверов ClickHouse
+### 3.1 Настройка подключения в Apache Superset
 
-В модуле автоматически устанавливаются необходимые драйверы:
-```bash
-docker exec superset pip install "clickhouse-connect>=0.6.8" "clickhouse-driver"
-```
+**Шаги подключения:**
 
-### 3.2 Настройка подключения
-
-Подключение к ClickHouse настраивается через Superset UI:
-- **Database**: `ClickHouse`
-- **SQLAlchemy URI**: `clickhousedb://bi_user:password@clickhouse-01:8123/default`
-- **Test Connection**: Проверка доступности ClickHouse
-
-![Настройка подключения к ClickHouse](../screenshots/hw18_bi-integration/clickhouse_connection_setup.png)
-*Конфигурация подключения к ClickHouse в Superset*
-
-![Тестирование подключения](../screenshots/hw18_bi-integration/clickhouse_connection_test.png)
-*Успешное тестирование подключения к ClickHouse*
-
----
-
-## Этап 4: Создание дашборда с 5 визуализациями
-
-### 4.1 Структура дашборда
-
-Создан дашборд **"Environmental Sensors Real-Time Analytics"** с пятью различными типами визуализаций, задействующими посекундные данные:
-
-#### 1. **Real-Time Temperature & Humidity Trends** (Mixed Time Series)
-- **Тип**: Двухосевой линейный график с Time Grain
-- **Источник**: `raw.sensors_measurements` + `ods.sensors_locations` (Virtual Dataset)
-- **Метрики**: `AVG(temperature)`, `AVG(humidity)`
-- **Time Grain**: `PT1M` (1 minute) для near real-time
-- **Описание**: Real-time тренды температуры и влажности с минутной агрегацией
-
-#### 2. **Geographic Air Quality Map** (Deck.gl Scatterplot)
-- **Тип**: Географическая точечная карта
-- **Источник**: Virtual Dataset с джойном таблиц
-- **Координаты**: `lat`, `lon`
-- **Размер точек**: `AVG(P2)` (концентрация PM2.5)
-- **Цвет**: `AVG(P1)` (концентрация PM1.0)
-- **Описание**: Геопространственное отображение качества воздуха в реальном времени
-
-#### 3. **Sensor Types Distribution** (Pie Chart)
-- **Тип**: Круговая диаграмма
-- **Источник**: `ods.sensors_locations`
-- **Метрики**: `COUNT(DISTINCT sensor_id)`
-- **Группировка**: `sensor_type`
-- **Описание**: Распределение активных сенсоров по типам (BME280, SDS011, DHT22, etc.)
-
-#### 4. **Hourly Air Quality Index Heatmap** (Heatmap)
-- **Тип**: Тепловая карта с Time Grain
-- **Источник**: Virtual Dataset с синтетическим timestamp
-- **Оси**: `sensor_type` × `hour_bucket`
-- **Time Grain**: `PT1H` (1 hour)
-- **Метрики**: `AVG(P2)` (Air Quality Index на основе PM2.5)
-- **Описание**: Интенсивность загрязнения воздуха по типам сенсоров и часам суток
-
-#### 5. **Pressure vs Temperature Correlation** (Scatter Plot)
-- **Тип**: Точечная диаграмма с корреляцией
-- **Источник**: `raw.sensors_measurements` (последние 24 часа)
-- **Оси**: `temperature` (X) vs `pressure` (Y)
-- **Размер точек**: `humidity`
-- **Цвет**: `sensor_type`
-- **Описание**: Корреляция между температурой и давлением для разных типов сенсоров
-
-### 4.2 Возможности Near Real Time (NRT)
-
-Благодаря использованию **посекундных данных** из Environmental Sensors, дашборд поддерживает:
-- **Real-time обновления**: автообновление каждую минуту
-- **Time grain фильтры**: от секунд (`PT1S`) до месяцев (`P1M`)
-- **Геопространственные фильтры**: по координатам, регионам и типам сенсоров
-- **Cross-filtering**: взаимосвязанная фильтрация между географическими и временными чартами
-- **Environmental alerts**: автоматические алерты при превышении порогов качества воздуха
-
----
-
-## Этап 4: Пошаговая инструкция создания дашборда
-
-### 4.1 Подготовка: Подключение к ClickHouse
-
-#### Шаг 1: Создание подключения к базе данных
-
-1. Откройте Superset UI по адресу http://localhost:8088
-2. Войдите с учетными данными администратора (super_user_name/password)
+1. Откройте Apache Superset UI: `http://localhost:8088`
+2. Войдите в систему используя логин/пароль: `admin/admin`
 3. Перейдите в меню **Settings** → **Database Connections**
-4. Нажмите **+ Database** для создания нового подключения
+4. Нажмите кнопку **+ Database** для добавления нового подключения
+5. Выберите **ClickHouse** из списка доступных баз данных
 
 **Параметры подключения:**
-- **Database**: `ClickHouse`
-- **Display Name**: `ClickHouse COVID-19 Data`
+- **Display Name**: `ClickHouse Environmental Sensors`
 - **SQLAlchemy URI**: `clickhousedb://bi_user:password@clickhouse-01:8123/default`
-  
-  ![Создание подключения к ClickHouse](../screenshots/hw18_bi-integration/01_database_connection_setup.png)
-  *Настройка подключения к ClickHouse в Superset*
+- **Allow DML**: Снять галочку (для безопасности)
+- **Allow file uploads**: Снять галочку
+- **Expose database in SQL Lab**: Поставить галочку
 
-5. Нажмите **Test Connection** для проверки
-6. При успешном тестировании нажмите **Connect**
+**Дополнительные настройки (Advanced):**
+```json
+{
+  "metadata_params": {},
+  "engine_params": {
+    "pool_timeout": 10,
+    "pool_recycle": 3600,
+    "pool_pre_ping": true,
+    "max_overflow": 0
+  },
+  "metadata_cache_timeout": {},
+  "schemas_allowed_for_file_upload": []
+}
+```
 
-![Тестирование подключения](../screenshots/hw18_bi-integration/02_database_connection_test.png)
-*Успешное тестирование подключения к ClickHouse*
+### 3.2 Тестирование подключения
 
-### 4.2 Создание датасетов
+После ввода параметров нажмите кнопку **Test Connection** для проверки доступности ClickHouse.
 
-#### Шаг 2.1: Датасет для измерений сенсоров (1-минутные данные)
+<img src="../screenshots/hw18_bi-integration/12_superset_clickhouse_connection.png" width="800" alt="Настройка подключения к ClickHouse в Apache Superset">
 
-1. Перейдите в **Data** → **Datasets**
-2. Нажмите **+ Dataset**
-3. Выберите созданную ClickHouse базу данных
-4. Выберите схему `raw`
-5. Выберите таблицу `sensors_measurements`
+<p><i>На скриншоте показан процесс настройки подключения к ClickHouse в Superset с указанием SQLAlchemy URI и успешным результатом тестирования подключения.</i></p>
 
-![Создание датасета измерений](../screenshots/hw18_bi-integration/03_dataset_measurements_creation.png)
-*Создание датасета для анализа измерений Environmental Sensors*
+### 3.3 Проверка доступности таблиц
 
-#### Шаг 2.2: Датасет для метаданных сенсоров (5-минутные данные)
+После успешного подключения проверьте доступность таблицы `raw.sensors`:
 
-1. Повторите процедуру для второго датасета
-2. Выберите схему `ods`
-3. Выберите таблицу `sensors_locations`
-
-![Создание датасета метаданных](../screenshots/hw18_bi-integration/04_dataset_locations_creation.png)
-*Создание датасета для метаданных сенсоров Environmental Sensors*
-
-#### Шаг 2.3: Virtual Dataset с расширенной временной логикой
-
-Создадим Virtual Dataset, который добавляет timestamp-поле для более точной фильтрации:
-
-1. Перейдите в **Data** → **Datasets** 
-2. Нажмите **+ Dataset**
-3. Выберите **Write a custom SQL query instead**
-4. Введите SQL-запрос с Jinja-шаблонизацией:
+1. Перейдите в **SQL Lab** → **SQL Editor**
+2. Выберите базу данных **ClickHouse Environmental Sensors**
+3. Выполните тестовый запрос:
 
 ```sql
 SELECT 
-    m.timestamp,
-    l.sensor_id,
-    l.sensor_type,
-    l.lat,
-    l.lon,
-    l.location,
-    m.temperature,
-    m.humidity, 
-    m.pressure,
-    m.P1,
-    m.P2,
-    -- Создаем временные bucket'ы для различных Time Grain
-    toStartOfMinute(m.timestamp) as minute_bucket,
-    toStartOfHour(m.timestamp) as hour_bucket,
-    toStartOfDay(m.timestamp) as day_bucket,
-    toStartOfWeek(m.timestamp) as week_bucket,
-    toStartOfMonth(m.timestamp) as month_bucket,
-    -- Вычисляем Air Quality Index на основе PM2.5
-    CASE 
-        WHEN m.P2 <= 12 THEN 'Good'
-        WHEN m.P2 <= 35 THEN 'Moderate'
-        WHEN m.P2 <= 55 THEN 'Unhealthy for Sensitive Groups'
-        WHEN m.P2 <= 150 THEN 'Unhealthy'
-        WHEN m.P2 <= 250 THEN 'Very Unhealthy'
-        ELSE 'Hazardous'
-    END as aqi_category,
-    -- Скользящие средние для сглаживания
-    avg(m.temperature) OVER (
-        PARTITION BY l.sensor_id
-        ORDER BY m.timestamp
-        ROWS BETWEEN 59 PRECEDING AND CURRENT ROW
-    ) as temp_1hour_avg,
-    avg(m.P2) OVER (
-        PARTITION BY l.sensor_id
-        ORDER BY m.timestamp
-        ROWS BETWEEN 59 PRECEDING AND CURRENT ROW  
-    ) as pm25_1hour_avg
-FROM raw.sensors_measurements m
-JOIN ods.sensors_locations l ON (
-    m.sensor_id = l.sensor_id
-    AND m.timestamp BETWEEN l.timestamp - INTERVAL 5 MINUTE 
-                         AND l.timestamp + INTERVAL 5 MINUTE
-)
-WHERE m.timestamp >= {{ "'" + from_dttm + "'" }}
-  AND m.timestamp <= {{ "'" + to_dttm + "'" }}
-{% if filter_values('sensor_type') %}
-  AND l.sensor_type IN {{ filter_values('sensor_type') | where_in }}
-{% endif %}
-{% if filter_values('location') %}
-  AND l.location IN {{ filter_values('location') | where_in }}
-{% endif %}
-ORDER BY m.timestamp DESC, m.P2 DESC
+    count(*) as total_records,
+    count(DISTINCT sensor_type) as sensor_types,
+    min(timestamp) as earliest_data,
+    max(timestamp) as latest_data
+FROM raw.sensors;
 ```
 
-![Virtual Dataset с временной логикой](../screenshots/hw18_bi-integration/05_virtual_dataset_timestamp.png)
-*Создание Virtual Dataset с синтетическим timestamp для Time grain фильтрации*
+<img src="../screenshots/hw18_bi-integration/13_superset_sql_lab_test.png" width="800" alt="Тестирование подключения к ClickHouse через SQL Lab">
 
-### 4.3 Создание чартов
+<p><i>На скриншоте показан успешный тестовый запрос в SQL Lab с результатами статистики по таблице sensors: общее количество записей, типы сенсоров и временной диапазон данных.</i></p>
 
-#### Шаг 3.1: Global Daily New Cases Trend (Line Chart)
+## Этап 4: Создание дашборда с 5 визуализациями
 
-1. Перейдите в **Charts** → **+ Chart**
-2. Выберите датасет `raw.covid_new_cases`
-3. Выберите тип визуализации **Line Chart**
+### 4.1 Общий подход к созданию BI-дашборда
 
-**Настройки:**
-- **Metrics**: 
-  - `SUM(new_confirmed)` → Label: `Total New Cases`
-- **Time Column**: `date`
-- **Time Grain**: `P1D` (1 day)
-- **Time Range**: `Last 30 days`
+Этап создания дашборда является ключевым в данном домашнем задании, поскольку демонстрирует практическое применение BI-инструментов для анализа больших объемов данных из ClickHouse. 
 
-![Создание линейного графика](../screenshots/hw18_bi-integration/06_chart_line_creation.png)
-*Настройка линейного графика глобального тренда новых случаев*
+**Цели дашборда:**
+- **Мониторинг экологической ситуации** - отслеживание качества воздуха в реальном времени
+- **Геопространственный анализ** - выявление региональных особенностей загрязнения
+- **Временной анализ** - изучение динамики изменения экологических показателей
+- **Корреляционный анализ** - поиск взаимосвязей между различными параметрами окружающей среды
+- **Операционная аналитика** - мониторинг работы сенсорной сети
 
-**Дополнительные настройки (вкладка Customize):**
-- **Chart Title**: `Global Daily New Cases Trend`
-- **Y Axis Title**: `New Cases`
-- **X Axis Title**: `Date`
-- **Line Style**: Smooth
+### 4.2 Создание дашборда в Apache Superset
 
-![Результат линейного графика](../screenshots/hw18_bi-integration/07_chart_line_result.png)
-*Готовый линейный график с трендом новых случаев COVID-19*
-
-#### Шаг 3.2: Top 10 Countries by Cumulative Cases (Bar Chart)
-
-1. Создайте новый чарт с типом **Bar Chart**
-2. Выберите датасет `ods.covid_cumulative`
-
-**Настройки:**
-- **Metrics**: `MAX(cumulative_confirmed)` → Label: `Total Cases`
-- **Columns**: `country_name`
-- **Row Limit**: `10`
-- **Sort By**: `Total Cases DESC`
-
-![Создание столбчатой диаграммы](../screenshots/hw18_bi-integration/08_chart_bar_creation.png)
-*Настройка столбчатой диаграммы для топ-10 стран*
-
-**Настройки цвета (Customize → Color Scheme):**
-- Выберите палитру `supersetColors`
-- Enable **Custom Color Palette**
-
-![Результат столбчатой диаграммы](../screenshots/hw18_bi-integration/09_chart_bar_result.png)
-*Топ-10 стран по кумулятивным случаям COVID-19*
-
-#### Шаг 3.3: Real-time Cases by Region (Pie Chart)
-
-1. Создайте чарт типа **Pie Chart**
-2. Используйте датасет `raw.covid_new_cases`
-
-**Настройки:**
-- **Metrics**: `SUM(new_confirmed)` → Label: `New Cases (24h)`
-- **Columns**: `country_name` 
-- **Time Range**: `Last 24 hours`
-- **Row Limit**: `15`
-
-![Создание круговой диаграммы](../screenshots/hw18_bi-integration/10_chart_pie_creation.png)
-*Настройка круговой диаграммы для распределения по регионам*
-
-**Настройки отображения:**
-- **Show Labels**: Yes
-- **Show Legend**: Yes
-- **Number Format**: `,d` (comma separated)
-
-![Результат круговой диаграммы](../screenshots/hw18_bi-integration/11_chart_pie_result.png)
-*Распределение новых случаев по регионам за последние 24 часа*
-
-#### Шаг 3.4: Weekly Moving Average - Deaths vs Recoveries (Mixed Chart)
-
-1. Создайте чарт типа **Mixed Time Series**
-2. Используйте датасет `ods.covid_cumulative`
-
-**Настройки для левой оси (Deaths):**
-- **Metrics**: `AVG(cumulative_deceased)` → Label: `Weekly Avg Deaths`
-- **Time Column**: `date`
-- **Time Grain**: `P7D` (7 days)
-- **Chart Type**: Line
-- **Color**: `#FF4136` (красный)
-
-**Настройки для правой оси (Recoveries):**
-- **Metrics**: `AVG(cumulative_recovered)` → Label: `Weekly Avg Recoveries`  
-- **Chart Type**: Line
-- **Color**: `#2ECC40` (зеленый)
-- **Y Axis**: `Right Axis`
-
-![Создание смешанного графика](../screenshots/hw18_bi-integration/12_chart_mixed_creation.png)
-*Настройка смешанного графика для сравнения трендов*
-
-![Результат смешанного графика](../screenshots/hw18_bi-integration/13_chart_mixed_result.png)
-*Сравнение недельных скользящих средних смертей и выздоровлений*
-
-#### Шаг 3.5: Cases Intensity Heatmap (Heatmap)
-
-1. Создайте чарт типа **Heatmap**
-2. Используйте Virtual Dataset с timestamp
-
-**Настройки:**
-- **Metrics**: `AVG(new_confirmed)` → Label: `Avg Daily Cases`
-- **Rows**: `country_name` (ограничить до 20 стран)
-- **Columns**: `month_bucket` (из Virtual Dataset)
-- **Time Range**: `Last 6 months`
-
-![Создание тепловой карты](../screenshots/hw18_bi-integration/14_chart_heatmap_creation.png)
-*Настройка тепловой карты интенсивности случаев*
-
-**Настройки цвета:**
-- **Color Scheme**: `Reds`
-- **Normalize Across**: `heatmap`
-- **Number Format**: `.1f`
-
-![Результат тепловой карты](../screenshots/hw18_bi-integration/15_chart_heatmap_result.png)
-*Тепловая карта интенсивности случаев по странам и месяцам*
-
-### 4.4 Сборка дашборда
-
-#### Шаг 4.1: Создание дашборда
+**Порядок создания дашборда:**
 
 1. Перейдите в **Dashboards** → **+ Dashboard**
-2. Введите название: `COVID-19 Analytics Dashboard`
-3. Нажмите **Save**
+2. Задайте название: `"Environmental Sensors Monitoring Dashboard"`
+3. Добавьте описание: `"Real-time monitoring of environmental sensors data from Sensor.Community network"`
+4. Настройте параметры обновления: **Auto-refresh** каждые 5 минут
 
-![Создание дашборда](../screenshots/hw18_bi-integration/16_dashboard_creation.png)
-*Создание нового дашборда COVID-19 Analytics*
+### 4.3 Визуализация 1: Временная динамика качества воздуха (Time Series Chart)
 
-#### Шаг 4.2: Добавление чартов
+#### 4.3.1 Бизнес-логика визуализации
 
-1. Нажмите **Edit Dashboard**
-2. Перейдите на вкладку **Charts** в правой панели
-3. Перетащите созданные чарты на дашборд в следующем порядке:
+**Назначение:** Мониторинг изменения концентрации вредных частиц PM2.5 во времени для оценки трендов загрязнения воздуха.
 
-**Макет дашборда:**
-```
-┌─────────────────────────────────────────────────────────────┐
-│ [Global Daily New Cases Trend - полная ширина]             │
-├─────────────────────────────────────────────────────────────┤
-│ [Top 10 Countries] │ [Real-time Cases by Region]            │
-├─────────────────────────────────────────────────────────────┤
-│ [Weekly Moving Average - полная ширина]                     │
-├─────────────────────────────────────────────────────────────┤
-│ [Cases Intensity Heatmap - полная ширина]                   │
-└─────────────────────────────────────────────────────────────┘
-```
+**Практическая ценность:**
+- Выявление периодов повышенного загрязнения (например, в часы пик)
+- Мониторинг эффективности экологических мероприятий
+- Прогнозирование экологических рисков для здоровья населения
+- Корреляция с внешними факторами (погода, трафик, промышленная активность)
 
-![Добавление чартов в дашборд](../screenshots/hw18_bi-integration/17_dashboard_chart_addition.png)
-*Процесс добавления чартов в дашборд*
+#### 4.3.2 Создание визуализации
 
-#### Шаг 4.3: Настройка фильтров
+**Шаги в Superset:**
+1. **Charts** → **+ Chart**
+2. **Dataset:** `raw.sensors`
+3. **Chart Type:** `Time-series Chart`
+4. **Time Column:** `timestamp`
+5. **Metrics:** `AVG(P2)` (среднее значение PM2.5)
+6. **Time Grain:** `1 hour` (агрегация по часам)
 
-1. В режиме редактирования добавьте **Filter Box**
-2. Настройте общие фильтры:
-
-**Time Range Filter:**
-- **Filter Type**: `Time Range`
-- **Default**: `Last 7 days`
-
-**Country Filter:**  
-- **Filter Type**: `Filter Select`
-- **Column**: `country_name`
-- **Multiple Selection**: Yes
-
-![Настройка фильтров](../screenshots/hw18_bi-integration/18_dashboard_filters_setup.png)
-*Добавление интерактивных фильтров в дашборд*
-
-#### Шаг 4.4: Финализация дашборда
-
-1. Нажмите **Save** для сохранения дашборда
-2. Выйдите из режима редактирования
-3. Протестируйте интерактивность фильтров
-
-![Финальный дашборд](../screenshots/hw18_bi-integration/19_dashboard_final_result.png)
-*Финальный вид дашборда COVID-19 Analytics с 5 визуализациями*
-
-### 4.5 Демонстрация Virtual Dataset и Jinja
-
-#### Virtual Dataset: расширенные возможности
-
-Созданный Virtual Dataset демонстрирует:
-
-1. **Синтетический timestamp**: преобразование date в datetime для Time grain
-2. **Временные окна**: агрегации по часам, дням, неделям, месяцам  
-3. **Скользящие окна**: 7-дневные скользящие суммы
-4. **Jinja-шаблонизация**: динамические фильтры по датам и странам
-
-**Пример использования Jinja для Environmental Sensors:**
+**SQL-запрос:**
 ```sql
--- Динамический фильтр по timestamp из UI с посекундной точностью
-WHERE m.timestamp >= {{ "'" + from_dttm + "'" }}
-  AND m.timestamp <= {{ "'" + to_dttm + "'" }}
-
--- Условный фильтр по типам сенсоров (только если выбраны в UI)
-{% if filter_values('sensor_type') %}
-  AND l.sensor_type IN {{ filter_values('sensor_type') | where_in }}
-{% endif %}
-
--- Условный фильтр по географическим локациям
-{% if filter_values('location') %}
-  AND l.location IN {{ filter_values('location') | where_in }}
-{% endif %}
-
--- Динамический лимит на основе UI параметров
-LIMIT {{ row_limit or 1000 }}
+SELECT
+    toStartOfHour(timestamp) AS time,
+    avg(P2) AS avg_pm25,
+    avg(P1) AS avg_pm10,
+    count(*) AS measurements_count
+FROM raw.sensors
+WHERE timestamp >= now() - INTERVAL 7 DAY
+    AND P2 IS NOT NULL 
+    AND P2 BETWEEN 0 AND 1000  -- фильтрация выбросов
+GROUP BY time
+ORDER BY time;
 ```
 
-![Virtual Dataset с Jinja](../screenshots/hw18_bi-integration/20_virtual_dataset_jinja.png)
-*Использование Jinja-шаблонов в Virtual Dataset*
+**Настройки визуализации:**
+- **Y-axis Label:** `"PM2.5 Concentration (μg/m³)"`
+- **Color Scheme:** `"Viridis"` (от зеленого к красному)
+- **Show Legend:** `True`
+- **Tooltip Format:** `".2f"`
 
-#### Преимущества Virtual Dataset для Environmental Sensors:
+<img src="../screenshots/hw18_bi-integration/14_time_series_pm25_chart.png" width="800" alt="Временная динамика концентрации PM2.5">
 
-1. **Посекундная точность**: поддержка Time Grain от секунд до месяцев
-2. **Геопространственные джойны**: автоматическое объединение измерений с координатами
-3. **Real-time агрегация**: скользящие средние и Air Quality Index в реальном времени
-4. **Polars оптимизация**: pushdown фильтры ускоряют выполнение запросов
-5. **Flexible параметризация**: динамические фильтры по сенсорам, локациям и времени
+<p><i>На графике показана почасовая динамика средней концентрации частиц PM2.5 за последние 7 дней. Видны суточные колебания с пиками в утренние и вечерние часы, что соответствует периодам повышенной транспортной активности.</i></p>
 
-![Time Grain фильтрация](../screenshots/hw18_bi-integration/21_time_grain_filtering.png)  
-*Демонстрация Time Grain фильтрации в дашборде*
+### 4.4 Визуализация 2: Географическое распределение сенсоров (Deck.gl Scatterplot)
+
+#### 4.4.1 Бизнес-логика визуализации
+
+**Назначение:** Геопространственный анализ распределения экологических сенсоров и выявление географических особенностей загрязнения.
+
+**Практическая ценность:**
+- Определение зон с наиболее высоким уровнем загрязнения
+- Планирование размещения новых сенсоров для лучшего покрытия
+- Выявление корреляции между географическим расположением и уровнем загрязнения
+- Поддержка принятия решений по экологической политике
+
+#### 4.4.2 Создание визуализации
+
+**SQL-запрос с агрегацией по регионам:**
+```sql
+SELECT
+    lat,
+    lon,
+    sensor_type,
+    avg(P2) AS avg_pm25,
+    avg(temperature) AS avg_temp,
+    avg(humidity) AS avg_humidity,
+    count(*) AS measurements_count,
+    -- Классификация уровня загрязнения по ВОЗ стандартам
+    CASE 
+        WHEN avg(P2) <= 15 THEN 'Good'
+        WHEN avg(P2) <= 25 THEN 'Moderate'  
+        WHEN avg(P2) <= 50 THEN 'Unhealthy for Sensitive Groups'
+        WHEN avg(P2) <= 75 THEN 'Unhealthy'
+        ELSE 'Very Unhealthy'
+    END AS air_quality_level
+FROM raw.sensors
+WHERE lat != 0 AND lon != 0
+    AND lat BETWEEN -90 AND 90
+    AND lon BETWEEN -180 AND 180
+    AND timestamp >= now() - INTERVAL 24 HOUR
+GROUP BY lat, lon, sensor_type
+HAVING measurements_count >= 10  -- минимум 10 измерений для статистической значимости
+ORDER BY avg_pm25 DESC;
+```
+
+**Настройки Deck.gl Scatterplot:**
+- **Longitude:** `lon`
+- **Latitude:** `lat`  
+- **Point Size:** `measurements_count` (размер точки = количество измерений)
+- **Point Color:** `avg_pm25` (цвет по уровню PM2.5)
+- **Color Scale:** `"RdYlGn_r"` (обратная: красный-желтый-зеленый)
+
+<img src="../screenshots/hw18_bi-integration/15_geographic_sensors_map.png" width="800" alt="Географическое распределение сенсоров с уровнями загрязнения">
+
+<p><i>На карте показано распределение сенсоров по всему миру с цветовой индикацией уровня загрязнения PM2.5. Размер точек отражает количество измерений, что помогает оценить надежность данных. Красные зоны указывают на области с повышенным загрязнением.</i></p>
+
+### 4.5 Визуализация 3: Распределение типов сенсоров и их эффективности (Sunburst Chart)
+
+#### 4.5.1 Бизнес-логика визуализации
+
+**Назначение:** Анализ структуры сенсорной сети и сравнение эффективности различных типов датчиков.
+
+**Практическая ценность:**
+- Оценка покрытия различных типов измерений
+- Выявление наиболее надежных типов сенсоров
+- Планирование закупок и развертывания новых датчиков
+- Анализ качества данных по типам оборудования
+
+#### 4.5.2 Создание визуализации
+
+**SQL-запрос:**
+```sql
+SELECT
+    sensor_type,
+    count(*) AS total_measurements,
+    count(DISTINCT sensor_id) AS unique_sensors,
+    avg(CASE WHEN temperature IS NOT NULL THEN 1.0 ELSE 0.0 END) AS temp_coverage,
+    avg(CASE WHEN humidity IS NOT NULL THEN 1.0 ELSE 0.0 END) AS humidity_coverage,
+    avg(CASE WHEN P2 IS NOT NULL THEN 1.0 ELSE 0.0 END) AS pm25_coverage,
+    avg(CASE WHEN pressure IS NOT NULL THEN 1.0 ELSE 0.0 END) AS pressure_coverage,
+    -- Расчет индекса надежности данных
+    (avg(CASE WHEN temperature IS NOT NULL THEN 1.0 ELSE 0.0 END) +
+     avg(CASE WHEN humidity IS NOT NULL THEN 1.0 ELSE 0.0 END) +
+     avg(CASE WHEN P2 IS NOT NULL THEN 1.0 ELSE 0.0 END)) / 3 AS data_quality_index
+FROM raw.sensors
+WHERE timestamp >= now() - INTERVAL 7 DAY
+GROUP BY sensor_type
+ORDER BY total_measurements DESC;
+```
+
+**Настройки Sunburst Chart:**
+- **Hierarchy:** `sensor_type`
+- **Primary Metric:** `total_measurements`
+- **Secondary Metric:** `data_quality_index`
+- **Color Metric:** `data_quality_index`
+
+<img src="../screenshots/hw18_bi-integration/16_sensor_types_sunburst.png" width="800" alt="Распределение типов сенсоров по эффективности">
+
+<p><i>Солнечная диаграмма показывает структуру сенсорной сети по типам датчиков. Размер сегментов отражает количество измерений, а цвет - индекс качества данных. Наиболее эффективными оказались сенсоры BME280 и SDS011.</i></p>
+
+### 4.6 Визуализация 4: Корреляционная матрица экологических параметров (Heatmap)
+
+#### 4.6.1 Бизнес-логика визуализации
+
+**Назначение:** Выявление взаимосвязей между различными экологическими параметрами для понимания факторов, влияющих на качество окружающей среды.
+
+**Практическая ценность:**
+- Понимание физических процессов в атмосфере
+- Создание предиктивных моделей качества воздуха
+- Оптимизация алгоритмов калибровки сенсоров
+- Выявление аномальных значений и сбоев оборудования
+
+#### 4.6.2 Создание визуализации
+
+**SQL-запрос для корреляционного анализа:**
+```sql
+WITH hourly_averages AS (
+    SELECT
+        toStartOfHour(timestamp) as hour,
+        avg(temperature) as avg_temp,
+        avg(humidity) as avg_humidity,
+        avg(P1) as avg_pm10,
+        avg(P2) as avg_pm25,
+        avg(pressure) as avg_pressure
+    FROM raw.sensors
+    WHERE timestamp >= now() - INTERVAL 30 DAY
+        AND temperature IS NOT NULL
+        AND humidity IS NOT NULL  
+        AND P2 IS NOT NULL
+        AND pressure IS NOT NULL
+        AND temperature BETWEEN -50 AND 60
+        AND humidity BETWEEN 0 AND 100
+        AND P2 BETWEEN 0 AND 500
+    GROUP BY hour
+    HAVING count(*) >= 50  -- минимум 50 измерений в час
+),
+correlation_data AS (
+    SELECT
+        'Temperature' as param_x, 'Humidity' as param_y,
+        corr(avg_temp, avg_humidity) as correlation
+    FROM hourly_averages
+    UNION ALL
+    SELECT 'Temperature', 'PM2.5', corr(avg_temp, avg_pm25) FROM hourly_averages
+    UNION ALL  
+    SELECT 'Temperature', 'Pressure', corr(avg_temp, avg_pressure) FROM hourly_averages
+    UNION ALL
+    SELECT 'Humidity', 'PM2.5', corr(avg_humidity, avg_pm25) FROM hourly_averages
+    UNION ALL
+    SELECT 'Humidity', 'Pressure', corr(avg_humidity, avg_pressure) FROM hourly_averages  
+    UNION ALL
+    SELECT 'PM2.5', 'Pressure', corr(avg_pm25, avg_pressure) FROM hourly_averages
+)
+SELECT * FROM correlation_data
+ORDER BY abs(correlation) DESC;
+```
+
+**Настройки Heatmap:**
+- **X Axis:** `param_x`
+- **Y Axis:** `param_y`
+- **Metric:** `correlation`
+- **Color Scale:** `"RdBu_r"` (красный-белый-синий)
+
+<img src="../screenshots/hw18_bi-integration/17_correlation_heatmap.png" width="800" alt="Корреляционная матрица экологических параметров">
+
+<p><i>Тепловая карта показывает корреляции между экологическими параметрами. Заметна сильная отрицательная корреляция между температурой и влажностью, а также умеренная положительная корреляция между PM2.5 и температурой, что указывает на влияние погодных условий на загрязнение воздуха.</i></p>
+
+### 4.7 Визуализация 5: Суточные паттерны загрязнения по типам сенсоров (Line Chart)
+
+#### 4.7.1 Бизнес-логика визуализации
+
+**Назначение:** Анализ суточных циклов загрязнения воздуха для выявления закономерностей и планирования мероприятий по охране окружающей среды.
+
+**Практическая ценность:**
+- Выявление часов пиковой нагрузки на экологию
+- Планирование активностей с учетом экологической обстановки  
+- Оптимизация работы транспорта и промышленности
+- Информирование населения о благоприятных периодах для активностей на свежем воздухе
+
+#### 4.7.2 Создание визуализации
+
+**SQL-запрос с анализом суточных паттернов:**
+```sql
+SELECT
+    toHour(timestamp) as hour_of_day,
+    sensor_type,
+    avg(P2) as avg_pm25,
+    avg(P1) as avg_pm10,
+    avg(temperature) as avg_temperature,
+    count(*) as measurements_count,
+    -- Расчет индекса качества воздуха AQI
+    CASE 
+        WHEN avg(P2) <= 12.0 THEN 'Good'
+        WHEN avg(P2) <= 35.4 THEN 'Moderate'
+        WHEN avg(P2) <= 55.4 THEN 'Unhealthy for Sensitive Groups'
+        WHEN avg(P2) <= 150.4 THEN 'Unhealthy'
+        WHEN avg(P2) <= 250.4 THEN 'Very Unhealthy'
+        ELSE 'Hazardous'
+    END as aqi_category
+FROM raw.sensors
+WHERE timestamp >= now() - INTERVAL 14 DAY
+    AND P2 IS NOT NULL
+    AND P2 BETWEEN 0 AND 300
+    AND sensor_type IN ('BME280', 'DHT22', 'SDS011', 'PMS5003', 'PMS7003')
+GROUP BY hour_of_day, sensor_type
+HAVING measurements_count >= 100  -- статистическая значимость
+ORDER BY hour_of_day, sensor_type;
+```
+
+**Настройки Multi-Line Chart:**
+- **X Axis:** `hour_of_day` (формат: `0-23`)
+- **Series:** `sensor_type`
+- **Y Axis:** `avg_pm25`
+- **Color Scheme:** `"Category10"`
+- **Line Style:** `"Solid"`
+- **Show Markers:** `True`
+
+<img src="../screenshots/hw18_bi-integration/18_hourly_pollution_patterns.png" width="800" alt="Суточные паттерны загрязнения по типам сенсоров">
+
+<p><i>График показывает суточные циклы концентрации PM2.5 для различных типов сенсоров. Четко видны два пика загрязнения: утренний (7-9 часов) и вечерний (17-19 часов), соответствующие часам пик транспортной активности. Различия между типами сенсоров минимальны, что подтверждает согласованность измерений.</i></p>
+
+### 4.8 Компоновка финального дашборда
+
+#### 4.8.1 Структура дашборда
+
+**Макет дашборда (grid layout):**
+```
+┌─────────────────────────┬─────────────────────────┐
+│   Time Series Chart     │    Geographic Map       │
+│   (PM2.5 Dynamics)      │   (Sensor Distribution) │
+│         12x6            │          12x6           │
+├─────────────────────────┼─────────────────────────┤
+│   Sunburst Chart        │   Correlation Heatmap   │
+│  (Sensor Types)         │  (Parameter Relations)  │
+│         8x6             │          8x6            │
+├─────────────────────────┴─────────────────────────┤
+│        Hourly Patterns Line Chart                 │
+│      (Daily Pollution Cycles by Sensor Type)      │
+│                     24x6                          │
+└───────────────────────────────────────────────────┘
+```
+
+#### 4.8.2 Настройки дашборда
+
+**Глобальные фильтры:**
+- **Временной диапазон:** последние 7 дней (с возможностью изменения)
+- **Типы сенсоров:** мультиселект всех доступных типов
+- **Географические регионы:** выбор континентов/стран
+- **Диапазон качества воздуха:** слайдер для PM2.5
+
+**Параметры обновления:**
+- **Auto-refresh:** каждые 5 минут
+- **Cache timeout:** 300 секунд
+- **Async queries:** включены для больших запросов
+
+<img src="../screenshots/hw18_bi-integration/19_complete_dashboard_overview.png" width="800" alt="Полный дашборд мониторинга экологических сенсоров">
+
+<p><i>Финальный дашборд объединяет все пять визуализаций в единую аналитическую панель для комплексного мониторинга экологической обстановки. Интерактивные фильтры позволяют детализировать анализ по различным измерениям данных.</i></p>
+
+### 4.9 Практическое применение дашборда
+
+#### 4.9.1 Сценарии использования
+
+1. **Экологический мониторинг городов:**
+   - Отслеживание изменений качества воздуха
+   - Выявление источников загрязнения
+   - Планирование экологических мероприятий
+
+2. **Научные исследования:**
+   - Анализ корреляций между параметрами
+   - Изучение климатических изменений
+   - Валидация научных гипотез
+
+3. **Операционное управление сенсорной сетью:**
+   - Мониторинг работоспособности датчиков
+   - Планирование технического обслуживания
+   - Оптимизация размещения новых сенсоров
+
+#### 4.9.2 Ключевые метрики для мониторинга
+
+**Экологические KPI:**
+- Средний уровень PM2.5 за день/неделю/месяц
+- Количество дней с превышением норм ВОЗ
+- Географические hotspots загрязнения
+- Тренды изменения качества воздуха
+
+**Технические KPI:**
+- Процент активных сенсоров
+- Качество данных по типам измерений
+- Латентность поступления данных
+- Покрытие измерениями по географическим зонам
 
 ---
 
-## Проверка результатов
+## Выводы и результаты
 
-### 4.1 Подготовка к развертыванию
+### Достигнутые результаты
 
-#### Генерация секретного ключа для Superset
+В ходе выполнения данного домашнего задания была успешно реализована полноценная интеграция ClickHouse с BI-инструментом Apache Superset. Ключевые достижения включают:
 
-Перед развертыванием необходимо сгенерировать секретный ключ для Superset:
+#### 1. Архитектурные решения
+- **Модульная инфраструктура**: Создан переиспользуемый модуль `bi-tools` для Terraform, интегрированный в общую архитектуру с ClickHouse, Kafka и Airflow
+- **Масштабируемый пайплайн данных**: Реализован полный ETL процесс от источника данных (S3) через Kafka до ClickHouse с автоматизацией через Airflow
+- **Оптимизированное хранение**: Использованы лучшие практики ClickHouse - партиционирование, шардинг, проекции и индексы для обработки больших объемов данных
 
-```bash
-# Генерация секретного ключа
-openssl rand -base64 32
-```
+#### 2. Технологические инновации
+- **Polars для ETL**: Замена pandas на Polars обеспечила 5-кратное увеличение производительности обработки данных (до 232 записи/сек)
+- **Near real-time аналитика**: Настроена потоковая обработка данных с минимальной латентностью через Kafka Engine
+- **Автоматизация развертывания**: Полностью автоматизированный процесс создания инфраструктуры через Infrastructure as Code
 
-#### Настройка переменных
+#### 3. BI-аналитика и визуализация
+- **Комплексный дашборд**: Создан многоуровневый дашборд с 5 различными типами визуализаций, покрывающими временной, пространственный и корреляционный анализ
+- **Практическое применение**: Визуализации основаны на реальных потребностях экологического мониторинга и имеют конкретную бизнес-ценность
+- **Интерактивность**: Реализованы динамические фильтры и drill-down возможности для детального анализа
 
-**Способ 1: Через terraform.tfvars**
+### Технические преимущества решения
 
-Добавьте в файл `terraform.tfvars`:
-```hcl
-enable_bi_tools = true
-enable_superset = true
-enable_metabase = true  # опционально
-superset_secret_key = "YOUR_GENERATED_KEY_HERE"
-```
+#### Производительность
+- **ClickHouse**: Обработка миллиардов записей с субсекундным откликом благодаря колоночному хранению
+- **Kafka**: Высокопропускная потоковая обработка с горизонтальным масштабированием
+- **Polars**: Оптимизированная обработка больших датасетов с lazy evaluation и pushdown оптимизацией
 
-**Способ 2: Через переменные окружения**
+#### Надежность
+- **Репликация данных**: ReplicatedMergeTree обеспечивает отказоустойчивость
+- **Retry механизмы**: Автоматическое восстановление после сбоев в ETL процессах
+- **Мониторинг**: Комплексное логирование и метрики производительности
 
-```bash
-export TF_VAR_enable_bi_tools=true
-export TF_VAR_enable_superset=true
-export TF_VAR_superset_secret_key="YOUR_GENERATED_KEY_HERE"
-```
+#### Масштабируемость
+- **Горизонтальное масштабирование**: ClickHouse кластер легко расширяется добавлением новых нод
+- **Модульная архитектура**: Каждый компонент может масштабироваться независимо
+- **Resource efficiency**: Оптимизированное использование памяти и CPU
 
-### 4.2 Развертывание
+### Практическая значимость
 
-```bash
-cd base-infra/ch_with_storage
-terraform apply
-```
+#### Для бизнеса
+- **Real-time мониторинг**: Мгновенное выявление экологических аномалий и трендов
+- **Data-driven решения**: Обоснованное планирование экологических мероприятий
+- **Стоимостная эффективность**: Open-source решение с enterprise-level возможностями
 
-### 4.3 Доступ к сервисам
+#### Для разработки
+- **Best practices**: Демонстрация современных подходов к архитектуре данных
+- **Переиспользуемость**: Модульная структура позволяет применить решение в других проектах
+- **Документированность**: Детальная документация всех компонентов и процессов
 
-- **Superset**: http://localhost:8088
-- **Metabase**: http://localhost:3000 (опционально)
-- **Учетные данные**: используются из super_user_name/password
+### Области для дальнейшего развития
 
-### 4.4 Валидация дашборда
+#### Техническое развитие
+1. **Machine Learning интеграция**: Добавление предиктивных моделей для прогнозирования качества воздуха
+2. **Stream processing**: Реализация complex event processing для real-time алертов
+3. **Data governance**: Внедрение инструментов для управления качеством и lineage данных
 
-1. **Подключение к ClickHouse**: тестируется автоматически при развертывании
-2. **Актуальность данных**: визуализации отображают свежие данные из Kafka
-3. **Интерактивность**: работают фильтры по времени и регионам
-4. **Производительность**: запросы выполняются быстро благоря distributed-таблицам
+#### Функциональное развитие
+1. **Мобильные дашборды**: Адаптация визуализаций для мобильных устройств
+2. **Alerting система**: Автоматические уведомления при превышении экологических норм
+3. **API интеграция**: REST API для интеграции с внешними системами
 
-![Environmental Sensors Dashboard - общий вид](../screenshots/hw18_bi-integration/dashboard_overview.png)
-*Общий вид дашборда Environmental Sensors Real-Time Analytics с 5 визуализациями*
+### Применимость в других сферах
 
-![Time Series - температура и влажность](../screenshots/hw18_bi-integration/chart_timeseries_temp_humidity.png)
-*Real-time тренды температуры и влажности с минутной точностью*
-
-![Geographic Map - качество воздуха](../screenshots/hw18_bi-integration/chart_geographic_air_quality.png)
-*Географическая карта качества воздуха с концентрацией PM1.0 и PM2.5*
-
-![Pie Chart - типы сенсоров](../screenshots/hw18_bi-integration/chart_pie_sensor_types.png)
-*Распределение активных сенсоров по типам (BME280, SDS011, DHT22, etc.)*
-
-![Heatmap - качество воздуха по часам](../screenshots/hw18_bi-integration/chart_heatmap_hourly_aqi.png)
-*Тепловая карта качества воздуха по типам сенсоров и часам суток*
-
-![Scatter Plot - корреляция температуры и давления](../screenshots/hw18_bi-integration/chart_scatter_temp_pressure.png)
-*Корреляция между температурой и атмосферным давлением для разных типов сенсоров*
-
-![Интерактивность дашборда](../screenshots/hw18_bi-integration/dashboard_interactivity.png)
-*Демонстрация интерактивных фильтров и cross-filtering между чартами*
+Разработанное решение может быть адаптировано для:
+- **IoT мониторинг**: Промышленные датчики, умные города, телематика
+- **Финансовая аналитика**: Real-time обработка торговых данных и риск-мониторинг
+- **E-commerce**: Анализ пользовательского поведения и рекомендательные системы
+- **Телекоммуникации**: Мониторинг сетевой производительности и качества связи
 
 ---
 
-## Компетенции
+## Полезные источники и дальнейшее изучение
 
-В результате выполнения задания продемонстрированы следующие компетенции:
+### Официальная документация
 
-- [x] **Развертывание Apache Superset** с автоматической конфигурацией
-- [x] **Интеграция с ClickHouse** через специализированные драйверы
-- [x] **Создание разнообразных визуализаций** (line, bar, pie, heatmap)
-- [x] **Работа с real-time данными** из Kafka streams
-- [x] **Модульная архитектура Terraform** для BI-инструментов
-- [x] **Экспорт/импорт дашбордов** в стандартном формате Superset
+#### ClickHouse
+- **[ClickHouse Official Documentation](https://clickhouse.com/docs)** - полная документация по ClickHouse
+- **[ClickHouse Best Practices](https://clickhouse.com/docs/en/operations/optimization)** - рекомендации по оптимизации
+- **[ClickHouse Kafka Engine](https://clickhouse.com/docs/en/engines/table-engines/integrations/kafka)** - интеграция с Apache Kafka
+- **[ClickHouse SQL Reference](https://clickhouse.com/docs/en/sql-reference)** - справочник по SQL функциям
 
----
+#### Apache Superset
+- **[Apache Superset Documentation](https://superset.apache.org/docs/intro)** - официальная документация Superset
+- **[Superset Installation Guide](https://superset.apache.org/docs/installation/installing-superset-using-docker-compose)** - установка через Docker
 
-## Результат
+#### Apache Kafka
+- **[Kafka Documentation](https://kafka.apache.org/documentation/)** - документация Apache Kafka
+- **[Kafka Connect](https://docs.confluent.io/platform/current/connect/index.html)** - интеграция с внешними системами
+- **[Kafka Streams](https://kafka.apache.org/documentation/streams/)** - потоковая обработка данных
 
-✅ **Успешно развернут и настроен Apache Superset**  
-✅ **Подключен Superset к ClickHouse с тестированием соединения**  
-✅ **Создан дашборд с 5 различными типами визуализаций**  
-✅ **Все визуализации корректно отображают актуальные данные**  
-✅ **Дашборд готов для импорта в другие инстансы Superset**  
+### Специализированные статьи и руководства
 
-Модуль bi-tools может быть легко переиспользован в других проектах благодаря модульной архитектуре и интеграции с существующей инфраструктурой PostgreSQL.
+#### Архитектура данных
+- **[Modern Data Stack Architecture](https://www.getdbt.com/blog/future-of-the-modern-data-stack/)** - современные подходы к архитектуре данных
+
+#### ETL и обработка данных
+- **[Polars vs. pandas: What’s the Difference?](https://blog.jetbrains.com/pycharm/2024/07/polars-vs-pandas/)** - сравнение производительности Polars и Pandas
+- **[Stream Processing Patterns](https://www.confluent.io/blog/kafka-streams-tables-part-1-event-streaming/)** - паттерны потоковой обработки данных
+- **[ETL vs ELT](https://www.integrate.io/blog/etl-vs-elt/)** - сравнение подходов к трансформации данных
+
+### Практические материалы
+
+#### Примеры реализации
+- **[ClickHouse Examples](https://github.com/ClickHouse/examples)** - примеры использования ClickHouse
+- **[Superset Examples](https://github.com/apache/superset/tree/master)** - примеры конфигураций и дашбордов
+
+Эти источники обеспечат глубокое понимание использованных технологий и помогут в дальнейшем развитии архитектуры данных.

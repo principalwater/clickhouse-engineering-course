@@ -93,12 +93,35 @@ def produce_sensors_data(**context):
         print(f"❌ Ошибка в продьюсере Environmental Sensors: {e}")
         raise
 
+def show_statistics(**context):
+    """Выводит статистику по завершению работы продьюсера."""
+    ti = context['ti']
+    producer_stats = ti.xcom_pull(task_ids='produce_sensors_data')
+    
+    if producer_stats:
+        print("📊 Статистика выполнения продьюсера:")
+        print(f"   - Отправлено сообщений: {producer_stats.get('sent_count')}")
+        print(f"   - Топик: {producer_stats.get('topic')}")
+        print(f"   - Размер батча: {producer_stats.get('batch_size')}")
+        print(f"   - Время завершения: {producer_stats.get('timestamp')}")
+        print(f"   - Предыдущий Watermark: {producer_stats.get('last_processed_timestamp')}")
+        print(f"   - Новый Watermark: {producer_stats.get('new_watermark')}")
+        
+        stats = producer_stats.get('producer_stats', {})
+        print("   - Статистика внутреннего состояния продьюсера:")
+        print(f"     - Всего записей в источнике: {stats.get('total_records')}")
+        print(f"     - Текущий индекс: {stats.get('current_index')}")
+        print(f"     - Отправлено уникальных хешей: {stats.get('sent_hashes')}")
+        print(f"     - Redis подключен: {stats.get('redis_connected')}")
+    else:
+        print("   ⚠️ Не удалось получить статистику от продьюсера.")
+
 # Создание DAG
 dag = DAG(
     'sensors_pipeline',
     default_args=default_args,
     description='Единый пайплайн для отправки данных Environmental Sensors в Kafka',
-    schedule=None,
+    schedule="* * * * *",  # каждую минуту в :00 секунд
     catchup=False,
     max_active_runs=1,
     tags=['environmental-sensors', 'kafka', 'producer', 'hw18'],
@@ -119,3 +142,11 @@ produce_task = PythonOperator(
     python_callable=produce_sensors_data,
     dag=dag,
 )
+
+show_statistics_task = PythonOperator(
+    task_id='show_statistics',
+    python_callable=show_statistics,
+    dag=dag,
+)
+
+produce_task >> show_statistics_task
