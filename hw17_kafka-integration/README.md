@@ -365,25 +365,38 @@ DATETIME_FIELDS = ['timestamp', 'created_at', 'updated_at', 'event_time']  # Str
 
 #### 3.1.2 Расширенные параметры конфигурации
 
-Конфигурация DAG поддерживает дополнительные параметры для оптимизации:
+Конфигурация DAG поддерживает дополнительные параметры для оптимизации. Ниже представлен пример конфигурации и описание опций:
 
 ```json
 {
   "kafka_topic": "covid_new_cases_1min",
   "target_table_name": "covid_new_cases",
   "dwh_layer": "raw",
-  "schema": { ... },
-  
-  // Необязательные параметры:
-  "create_projection": true,           // создавать проекцию для оптимизации
-  "projection_order_by": null,         // кастомная сортировка для проекции
-  "create_indexes": true,              // создавать доп. индексы
-  "index_fields": ["date", "location_key"], // поля для индексов
-  "table_settings": {},                // доп. настройки таблицы
-  "skip_alter_on_error": true,         // пропускать ALTER при ошибках
-  "recreate_tables": false             // пересоздавать таблицы (осторожно!)
+  "schema": {
+    "date": "String",
+    "location_key": "String",
+    "new_confirmed": "Int32",
+    "new_deceased": "Int32",
+    "new_recovered": "Int32",
+    "new_tested": "Int32"
+  },
+  "create_projection": true,
+  "projection_order_by": null,
+  "create_indexes": true,
+  "index_fields": ["date", "location_key"],
+  "table_settings": {},
+  "skip_alter_on_error": true,
+  "recreate_tables": false
 }
 ```
+
+- **`create_projection`** (bool, опционально): Создавать ли проекцию для оптимизации запросов.
+- **`projection_order_by`** (string, опционально): Поля для сортировки в проекции (например, `'date, location_key'`). Если `null`, используется ключ партиционирования.
+- **`create_indexes`** (bool, опционально): Создавать ли дополнительные индексы.
+- **`index_fields`** (list, опционально): Список полей для создания индексов.
+- **`table_settings`** (dict, опционально): Дополнительные настройки для движка таблицы `MergeTree`.
+- **`skip_alter_on_error`** (bool, опционально): Пропускать ли выполнение `ALTER`-запросов (добавление индексов/проекций) в случае ошибок.
+- **`recreate_tables`** (bool, опционально): Пересоздавать ли таблицы при каждом запуске. **Внимание: это приведет к потере данных!**
 
 #### 3.1.3 Улучшенная обработка ошибок
 
