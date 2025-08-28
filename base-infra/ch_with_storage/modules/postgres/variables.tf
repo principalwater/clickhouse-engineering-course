@@ -107,3 +107,10 @@ variable "superset_pg_db" {
   type        = string
   default     = "superset"
 }
+
+# ---- Section: ClickHouse Network settings ----
+variable "clickhouse_network_name" {
+  description = "Имя сети Docker для ClickHouse."
+  type        = string
+  default     = ""
+}

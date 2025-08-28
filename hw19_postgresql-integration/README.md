@@ -8,10 +8,10 @@
 - [Пошаговая инструкция выполнения](#пошаговая-инструкция-выполнения)
   - [Этап 1: Инициализация базы данных PostgreSQL](#этап-1-инициализация-базы-данных-postgresql)
   - [Этап 2: Загрузка тестового датасета в PostgreSQL](#этап-2-загрузка-тестового-датасета-в-postgresql)
-  - [Этап 3: Запрос данных из PostgreSQL через функцию postgres](#этап-3-запрос-данных-из-postgresql-через-функцию-postgres)
+  - [Этап 3: Запрос данных из PostgreSQL через функцию postgresql](#этап-3-запрос-данных-из-postgresql-через-функцию-postgresql)
   - [Этап 4: Создание таблицы с движком Postgres в ClickHouse](#этап-4-создание-таблицы-с-движком-postgres-в-clickhouse)
   - [Этап 5: Создание базы данных для интеграции с PostgreSQL](#этап-5-создание-базы-данных-для-интеграции-с-postgresql)
-- [Критерии оценки](#критерии-оценки)
+- [Критерии оценки](#проверка-выполнения-критериев-по-заданию)
 - [Компетенции](#компетенции)
 - [Полезные источники](#полезные-источники)
 
@@ -70,6 +70,11 @@ variable "postgres_databases" {
   default     = ["airflow_db", "superset_db", "metabase_db"]
 }
 ```
+
+> **Примечание о сетевой конфигурации:**
+> В исходной конфигурации Terraform контейнеры ClickHouse и PostgreSQL запускались в разных, изолированных сетях Docker (`clickhouse-engineering-course-network` и `postgres_network` соответственно). Это не позволяло им общаться друг с другом напрямую по имени хоста.
+>
+> Для решения этой проблемы в конфигурацию Terraform были внесены изменения: контейнер PostgreSQL был дополнительно подключен к сети ClickHouse. Это позволяет ClickHouse обращаться к PostgreSQL по его имени контейнера (`postgres`), что является стандартной практикой для межконтейнерного взаимодействия в Docker.
 
 #### 1.3 Проверка состояния PostgreSQL
 
@@ -187,41 +192,75 @@ CREATE INDEX idx_youtube_like_dislike ON youtube_videos(like_count, dislike_coun
 Для демонстрации интеграции загрузим выборку данных из YouTube датасета. Сначала получим данные через ClickHouse, а затем экспортируем в PostgreSQL:
 
 ```sql
--- В ClickHouse: создание временной таблицы для выборки данных
+-- В ClickHouse: сначала создаем таблицу с правильной схемой
 CREATE TABLE temp_youtube_sample
-ENGINE = Memory
-AS SELECT
-    id,
-    parseDateTimeBestEffortUSOrZero(toString(fetch_date)) AS fetch_date,
-    upload_date AS upload_date_str,
-    toDate(parseDateTimeBestEffortUSOrZero(upload_date::String)) AS upload_date,
-    title,
-    uploader_id,
-    uploader,
-    uploader_sub_count,
-    is_age_limit,
-    view_count,
-    like_count,
-    dislike_count,
-    is_crawlable,
-    has_subtitles,
-    is_ads_enabled,
-    is_comments_enabled,
-    description
-FROM s3(
-    'https://clickhouse-public-datasets.s3.amazonaws.com/youtube/original/files/*.zst',
-    'JSONLines'
+(
+    id String,
+    fetch_date DateTime,
+    upload_date_str String,
+    upload_date Date,
+    title String,
+    uploader_id String,
+    uploader String,
+    uploader_sub_count Int64,
+    is_age_limit Bool,
+    view_count Int64,
+    like_count Int64,
+    dislike_count Int64,
+    is_crawlable Bool,
+    has_subtitles Bool,
+    is_ads_enabled Bool,
+    is_comments_enabled Bool,
+    description String
+)
+ENGINE = Memory;
+
+-- Движок Memory используется для временного хранения данных в оперативной памяти.
+-- Подходит для небольших промежуточных таблиц, которые будут использоваться
+-- для экспорта в другие системы и не требуют персистентности.
+-- Данные исчезнут при перезапуске ClickHouse.
+
+-- Затем заполняем таблицу данными из S3
+INSERT INTO temp_youtube_sample
+SELECT * FROM (
+    SELECT
+        id,
+        parseDateTimeBestEffortUSOrZero(toString(fetch_date)) AS fetch_date,
+        upload_date AS upload_date_str,
+        toDate(parseDateTimeBestEffortUSOrZero(upload_date::String)) AS upload_date,
+        ifNull(title, '') AS title,
+        uploader_id,
+        ifNull(uploader, '') AS uploader,
+        uploader_sub_count,
+        is_age_limit,
+        view_count,
+        like_count,
+        dislike_count,
+        is_crawlable,
+        has_subtitles,
+        is_ads_enabled,
+        is_comments_enabled,
+        ifNull(description, '') AS description
+    FROM s3(
+        'https://clickhouse-public-datasets.s3.amazonaws.com/youtube/original/files/*.zst',
+        'JSONLines'
+    )
+    LIMIT 1000000  -- Ограничиваем количество загружаемых записей
 )
 WHERE view_count > 1000000  -- Только популярные видео
 AND dislike_count > 0       -- С дизлайками
-LIMIT 10000;                -- Ограничение для демо
+SETTINGS input_format_null_as_default = 1, max_insert_block_size=1000000;
 ```
+
+**Важно:** Чтобы `LIMIT` применился корректно на этапе чтения из S3, а не после обработки всех данных, оборачиваем `SELECT` в подзапрос. Это позволяет ClickHouse ограничить количество читаемых записей до 1,000,000, а затем применить фильтры `WHERE` к этому подмножеству данных.
+
+<img src="../screenshots/hw19_postgresql-integration/04_01_clickhouse_data_loading.png" width="800" alt="Загрузка тестовых данных в ClickHouse">
 
 Теперь экспортируем данные в CSV и загрузим в PostgreSQL:
 
 ```bash
 # Экспорт данных из ClickHouse в CSV
-docker exec clickhouse-01 clickhouse-client --query "
+docker exec clickhouse-01 clickhouse-client  -u "$CH_USER" --password "$CH_PASSWORD" --query "
 SELECT * FROM temp_youtube_sample
 FORMAT CSV
 " > /tmp/youtube_sample.csv
@@ -238,6 +277,9 @@ WITH (FORMAT csv);
 Альтернативно, вставим несколько записей вручную для демонстрации:
 
 ```sql
+-- ВАЖНО: Подключитесь к базе youtube_data!
+-- docker exec -it postgres psql -U postgres -d youtube_data
+
 -- Вставка демонстрационных данных в PostgreSQL
 INSERT INTO youtube_videos (
     id, fetch_date, upload_date_str, upload_date, title, uploader_id, uploader,
@@ -265,17 +307,22 @@ ORDER BY view_count DESC
 LIMIT 5;
 ```
 
-<img src="../screenshots/hw19_postgresql-integration/04_postgres_data_loading.png" width="800" alt="Загрузка тестовых данных в PostgreSQL">
+<img src="../screenshots/hw19_postgresql-integration/04_02_postgres_data_loading.png" width="800" alt="Загрузка тестовых данных в PostgreSQL">
+
+<img src="../screenshots/hw19_postgresql-integration/04_03_postgres_data_loading.png" width="800" alt="Загрузка тестовых данных в PostgreSQL">
 
 <p><i>На скриншоте показан процесс загрузки демонстрационных данных YouTube в PostgreSQL и базовая статистика по загруженным записям.</i></p>
 
 ---
 
-### Этап 3: Запрос данных из PostgreSQL через функцию postgres
+### Этап 3: Запрос данных из PostgreSQL через функцию postgresql
 
 #### 3.1 Использование функции postgres в ClickHouse
 
-ClickHouse предоставляет функцию `postgres` для выполнения запросов к внешней PostgreSQL базе данных без создания постоянных таблиц.
+ClickHouse предоставляет функцию `postgres` для выполнения запросов к внешней PostgreSQL базе данных без создания постоянных таблиц. Детальное описание интеграции и подключения можно найти в официальной документации:
+
+- **[Интеграция с PostgreSQL](https://clickhouse.com/docs/integrations/postgresql)**
+- **[Подключение к PostgreSQL](https://clickhouse.com/docs/integrations/postgresql/connecting-to-postgresql)**
 
 **Синтаксис функции postgres:**
 ```sql
@@ -286,15 +333,17 @@ postgres('host:port', 'database', 'table', 'user', 'password'[, 'schema'])
 
 Сначала проверим подключение к PostgreSQL из ClickHouse:
 
+**Примечание:** Для успешного подключения ClickHouse и PostgreSQL должны находиться в одной сети Docker. В нашей конфигурации мы используем имя контейнера `postgres` в качестве хоста, так как оба сервиса подключены к общей сети.
+
 ```sql
 -- Проверка подключения к PostgreSQL
 SELECT count(*) as total_records
-FROM postgres('postgres:5432', 'youtube_data', 'youtube_videos', 'clickhouse_user', 'clickhouse_password');
+FROM postgresql('postgres:5432', 'youtube_data', 'youtube_videos', 'clickhouse_user', 'clickhouse_password');
 ```
 
 <img src="../screenshots/hw19_postgresql-integration/05_clickhouse_postgres_connection.png" width="800" alt="Проверка подключения ClickHouse к PostgreSQL">
 
-<p><i>На скриншоте показан успешный результат подключения ClickHouse к PostgreSQL через функцию postgres и подсчет общего количества записей в таблице.</i></p>
+<p><i>На скриншоте показан успешный результат подключения ClickHouse к PostgreSQL через функцию postgresql и подсчет общего количества записей в таблице.</i></p>
 
 #### 3.3 Сложные аналитические запросы
 
@@ -308,11 +357,15 @@ SELECT
     sum(like_count) as total_likes,
     sum(dislike_count) as total_dislikes,
     round(sum(like_count) / sum(dislike_count), 2) as like_dislike_ratio
-FROM postgres('postgres:5432', 'youtube_data', 'youtube_videos', 'clickhouse_user', 'clickhouse_password')
+FROM postgresql('postgres:5432', 'youtube_data', 'youtube_videos', 'clickhouse_user', 'clickhouse_password')
 GROUP BY uploader
 ORDER BY total_views DESC
 LIMIT 10;
+```
 
+<img src="../screenshots/hw19_postgresql-integration/06_01_clickhouse_postgres_analytics.png" width="800" alt="Аналитические запросы к PostgreSQL из ClickHouse">
+
+```sql
 -- 2. Анализ активности по годам загрузки
 SELECT 
     toYear(upload_date) as upload_year,
@@ -320,36 +373,37 @@ SELECT
     avg(view_count) as avg_views,
     avg(like_count) as avg_likes,
     avg(dislike_count) as avg_dislikes
-FROM postgres('postgres:5432', 'youtube_data', 'youtube_videos', 'clickhouse_user', 'clickhouse_password')
+FROM postgresql('postgres:5432', 'youtube_data', 'youtube_videos', 'clickhouse_user', 'clickhouse_password')
 WHERE upload_date IS NOT NULL
 GROUP BY upload_year
 ORDER BY upload_year;
-
--- 3. Распределение видео по популярности
-SELECT 
-    CASE 
-        WHEN view_count < 1000000 THEN 'Low (< 1M)'
-        WHEN view_count < 10000000 THEN 'Medium (1M-10M)'
-        WHEN view_count < 100000000 THEN 'High (10M-100M)'
-        ELSE 'Viral (100M+)'
-    END as popularity_category,
-    count(*) as video_count,
-    round(avg(like_count / dislike_count), 2) as avg_like_ratio
-FROM postgres('postgres:5432', 'youtube_data', 'youtube_videos', 'clickhouse_user', 'clickhouse_password')
-WHERE dislike_count > 0
-GROUP BY popularity_category
-ORDER BY 
-    CASE popularity_category
-        WHEN 'Low (< 1M)' THEN 1
-        WHEN 'Medium (1M-10M)' THEN 2
-        WHEN 'High (10M-100M)' THEN 3
-        WHEN 'Viral (100M+)' THEN 4
-    END;
 ```
 
-<img src="../screenshots/hw19_postgresql-integration/06_clickhouse_postgres_analytics.png" width="800" alt="Аналитические запросы к PostgreSQL из ClickHouse">
+<img src="../screenshots/hw19_postgresql-integration/06_02_clickhouse_postgres_analytics.png" width="800" alt="Аналитические запросы к PostgreSQL из ClickHouse">
 
-<p><i>На скриншоте показаны результаты выполнения сложных аналитических запросов к данным PostgreSQL через функцию postgres в ClickHouse, включая анализ популярности каналов и трендов по годам.</i></p>
+```sql
+-- 3. Распределение видео по популярности (синтаксис ClickHouse)
+SELECT 
+    multiIf(
+        view_count < 1000000, 'Low (< 1M)',
+        view_count < 10000000, 'Medium (1M-10M)',
+        view_count < 100000000, 'High (10M-100M)',
+        'Viral (100M+)'
+    ) AS popularity_category,
+    count(*) AS video_count,
+    round(avg(like_count / dislike_count), 2) AS avg_like_ratio
+FROM postgresql('postgres:5432', 'youtube_data', 'youtube_videos', 'clickhouse_user', 'clickhouse_password')
+WHERE dislike_count > 0
+GROUP BY popularity_category
+ORDER BY multiIf(
+    popularity_category = 'Low (< 1M)', 1,
+    popularity_category = 'Medium (1M-10M)', 2,
+    popularity_category = 'High (10M-100M)', 3,
+    4
+) ASC;
+```
+
+<img src="../screenshots/hw19_postgresql-integration/06_03_clickhouse_postgres_analytics.png" width="800" alt="Аналитические запросы к PostgreSQL из ClickHouse">
 
 #### 3.4 Соединение данных из разных источников
 
@@ -380,12 +434,12 @@ SELECT
     p.like_count,
     p.dislike_count,
     round(p.like_count / p.dislike_count, 2) as like_ratio
-FROM postgres('postgres:5432', 'youtube_data', 'youtube_videos', 'clickhouse_user', 'clickhouse_password') p
+FROM postgresql('postgres:5432', 'youtube_data', 'youtube_videos', 'clickhouse_user', 'clickhouse_password') p
 INNER JOIN youtube_categories c ON p.uploader = c.uploader
 ORDER BY p.view_count DESC;
 ```
 
-<img src="../screenshots/hw19_postgresql-integration/07_clickhouse_postgres_join.png" width="800" alt="Соединение данных PostgreSQL с локальными данными ClickHouse">
+<img src="../screenshots/hw19_postgresql-integration/07_clickhouse_postgres_join.png" width="1000" alt="Соединение данных PostgreSQL с локальными данными ClickHouse">
 
 <p><i>На скриншоте показан пример соединения данных из PostgreSQL с локальной таблицей ClickHouse, демонстрируя возможности гибридной аналитики.</i></p>
 
@@ -393,13 +447,16 @@ ORDER BY p.view_count DESC;
 
 ### Этап 4: Создание таблицы с движком Postgres в ClickHouse
 
+Помимо использования функции `postgresql` для одноразовых запросов, ClickHouse предлагает более постоянный способ интеграции через **табличный движок PostgreSQL**. Этот движок позволяет создать в ClickHouse таблицу, которая является прямым прокси к таблице в PostgreSQL, обеспечивая прозрачный доступ к данным. Подробнее о нем можно прочитать в [официальной документации](https://clickhouse.com/docs/en/engines/table-engines/integrations/postgresql).
+
+
 #### 4.1 Создание таблицы с движком PostgreSQL
 
 Движок PostgreSQL в ClickHouse позволяет создавать таблицы, которые непосредственно ссылаются на таблицы в PostgreSQL, обеспечивая прозрачный доступ к данным.
 
 ```sql
 -- Создание таблицы с движком PostgreSQL в ClickHouse
-CREATE TABLE youtube_videos_pg (
+CREATE TABLE youtube_videos_pg ON CLUSTER dwh_test (
     id String,
     fetch_date DateTime,
     upload_date_str String,
@@ -420,7 +477,7 @@ CREATE TABLE youtube_videos_pg (
 ) ENGINE = PostgreSQL('postgres:5432', 'youtube_data', 'youtube_videos', 'clickhouse_user', 'clickhouse_password');
 
 -- Проверка структуры созданной таблицы
-DESCRIBE TABLE youtube_videos_pg;
+SHOW CREATE TABLE youtube_videos_pg;
 
 -- Проверка данных через движок PostgreSQL
 SELECT count(*) FROM youtube_videos_pg;
@@ -444,8 +501,13 @@ SELECT
     dislike_count
 FROM youtube_videos_pg
 WHERE view_count > 5000000000
-ORDER BY view_count DESC;
+ORDER BY view_count DESC
+LIMIT 10;
+```
 
+<img src="../screenshots/hw19_postgresql-integration/09_01_clickhouse_postgres_engine_queries.png" width="1000" alt="Запросы к таблице с движком PostgreSQL">
+
+```sql
 -- 2. Агрегационные запросы
 SELECT 
     count(*) as total_videos,
@@ -454,7 +516,11 @@ SELECT
     max(view_count) as max_views,
     min(view_count) as min_views
 FROM youtube_videos_pg;
+```
 
+<img src="../screenshots/hw19_postgresql-integration/09_02_clickhouse_postgres_engine_queries.png" width="1000" alt="Запросы к таблице с движком PostgreSQL">
+
+```sql
 -- 3. Группировка и сортировка
 SELECT 
     uploader,
@@ -464,8 +530,13 @@ SELECT
 FROM youtube_videos_pg
 WHERE dislike_count > 0
 GROUP BY uploader
-ORDER BY total_views DESC;
+ORDER BY total_views DESC
+LIMIT 10;
+```
 
+<img src="../screenshots/hw19_postgresql-integration/09_03_clickhouse_postgres_engine_queries.png" width="1000" alt="Запросы к таблице с движком PostgreSQL">
+
+```sql
 -- 4. Фильтрация по датам
 SELECT 
     toYear(upload_date) as year,
@@ -477,13 +548,13 @@ GROUP BY year
 ORDER BY year;
 ```
 
-<img src="../screenshots/hw19_postgresql-integration/09_clickhouse_postgres_engine_queries.png" width="800" alt="Запросы к таблице с движком PostgreSQL">
+<img src="../screenshots/hw19_postgresql-integration/09_04_clickhouse_postgres_engine_queries.png" width="1000" alt="Запросы к таблице с движком PostgreSQL">
 
 <p><i>На скриншоте показаны результаты различных типов запросов к таблице с движком PostgreSQL: фильтрация, агрегация, группировка и сортировка данных.</i></p>
 
 #### 4.3 Возможности записи данных
 
-Движок PostgreSQL также поддерживает операции записи:
+Движок PostgreSQL также поддерживает операции записи `INSERT`.
 
 ```sql
 -- INSERT в таблицу PostgreSQL из ClickHouse
@@ -513,16 +584,27 @@ INSERT INTO youtube_videos_pg (
 
 -- Проверка вставленной записи
 SELECT * FROM youtube_videos_pg WHERE id = 'TEST123456';
+```
 
--- UPDATE операции (если поддерживаются)
--- Примечание: UPDATE может не поддерживаться в зависимости от версии
--- ALTER UPDATE youtube_videos_pg SET view_count = view_count + 1000 WHERE id = 'TEST123456';
+<img src="../screenshots/hw19_postgresql-integration/10_01_clickhouse_postgres_engine_write.png" width="800" alt="Операции записи через движок PostgreSQL">
+
+**Важное примечание об операциях `UPDATE` и `DELETE`:**
+
+На данный момент табличный движок `PostgreSQL` в ClickHouse **не поддерживает** операции `UPDATE` и `DELETE` (мутации). Попытка выполнить команду `ALTER TABLE ... UPDATE` или `DELETE` приведет к ошибке `DB::Exception: Table engine PostgreSQL doesn't support mutations. (NOT_IMPLEMENTED)`.
+
+Это связано с тем, что движок спроектирован как оптимизированный прокси для чтения данных (`SELECT`) и вставки новых данных (`INSERT`). Механизм асинхронных мутаций ClickHouse не транслируется в соответствующие команды для внешней СУБД PostgreSQL.
+
+Для изменения или удаления данных необходимо выполнять соответствующие запросы напрямую в PostgreSQL. Подробнее об ограничениях можно прочитать в [официальной документации](https://clickhouse.com/docs/en/engines/table-engines/integrations/postgresql).
+
+```sql
+-- Следующая команда вызовет ошибку, так как мутации не поддерживаются:
+-- ALTER TABLE youtube_videos_pg UPDATE view_count = view_count + 1000 WHERE id = 'TEST123456';
 
 -- Проверка общего количества записей
 SELECT count(*) as total_after_insert FROM youtube_videos_pg;
 ```
 
-<img src="../screenshots/hw19_postgresql-integration/10_clickhouse_postgres_engine_write.png" width="800" alt="Операции записи через движок PostgreSQL">
+<img src="../screenshots/hw19_postgresql-integration/10_02_clickhouse_postgres_engine_write.png" width="800" alt="Операции записи через движок PostgreSQL">
 
 <p><i>На скриншоте показаны операции вставки данных в PostgreSQL через ClickHouse таблицу с движком PostgreSQL и проверка результатов записи.</i></p>
 
@@ -536,7 +618,7 @@ ClickHouse поддерживает создание целой базы дан�
 
 ```sql
 -- Создание базы данных с движком PostgreSQL
-CREATE DATABASE youtube_postgres_db 
+CREATE DATABASE youtube_postgres_db ON CLUSTER dwh_test 
 ENGINE = PostgreSQL('postgres:5432', 'youtube_data', 'clickhouse_user', 'clickhouse_password');
 
 -- Проверка созданной базы данных
@@ -557,10 +639,25 @@ SHOW TABLES FROM youtube_postgres_db;
 ```sql
 -- Обращение к таблицам через базу данных PostgreSQL
 SELECT count(*) FROM youtube_postgres_db.youtube_videos;
+```
 
+<img src="../screenshots/hw19_postgresql-integration/12_01_clickhouse_postgres_database_queries.png" width="800" alt="Запросы к базе данных с движком PostgreSQL">
+
+```sql
 -- Описание структуры таблицы через PostgreSQL базу данных
 DESCRIBE TABLE youtube_postgres_db.youtube_videos;
+```
 
+<img src="../screenshots/hw19_postgresql-integration/12_02_clickhouse_postgres_database_queries.png" width="800" alt="Запросы к базе данных с движком PostgreSQL">
+
+```sql
+-- DDL таблицы
+SHOW CREATE TABLE youtube_postgres_db.youtube_videos;
+```
+
+<img src="../screenshots/hw19_postgresql-integration/12_03_clickhouse_postgres_database_queries.png" width="800" alt="Запросы к базе данных с движком PostgreSQL">
+
+```sql
 -- Выполнение аналитических запросов через PostgreSQL базу данных
 SELECT 
     uploader,
@@ -570,10 +667,15 @@ SELECT
     round(avg(dislike_count), 0) as avg_dislikes
 FROM youtube_postgres_db.youtube_videos
 GROUP BY uploader
-ORDER BY total_views DESC;
+ORDER BY total_views DESC
+LIMIT 10;
+```
 
+<img src="../screenshots/hw19_postgresql-integration/12_04_clickhouse_postgres_database_queries.png" width="800" alt="Запросы к базе данных с движком PostgreSQL">
+
+```sql
 -- Создание представления на основе PostgreSQL данных
-CREATE VIEW top_youtube_channels AS
+CREATE VIEW top_youtube_channels ON CLUSTER dwh_test AS
 SELECT 
     uploader,
     count(*) as video_count,
@@ -587,10 +689,10 @@ HAVING video_count > 0
 ORDER BY total_views DESC;
 
 -- Проверка созданного представления
-SELECT * FROM top_youtube_channels;
+SELECT * FROM top_youtube_channels LIMIT 10;
 ```
 
-<img src="../screenshots/hw19_postgresql-integration/12_clickhouse_postgres_database_queries.png" width="800" alt="Запросы к базе данных с движком PostgreSQL">
+<img src="../screenshots/hw19_postgresql-integration/12_05_clickhouse_postgres_database_queries.png" width="800" alt="Запросы к базе данных с движком PostgreSQL">
 
 <p><i>На скриншоте показаны различные операции с базой данных PostgreSQL: обычные запросы, создание представлений и аналитические вычисления на основе внешних данных.</i></p>
 
@@ -598,8 +700,8 @@ SELECT * FROM top_youtube_channels;
 
 Создадим дополнительные таблицы в PostgreSQL для демонстрации автоматического отображения:
 
-```sql
--- В PostgreSQL: создание дополнительной таблицы
+```sh
+# В PostgreSQL: создание дополнительной таблицы
 docker exec postgres psql -U clickhouse_user -d youtube_data -c "
 CREATE TABLE channel_categories (
     uploader_id VARCHAR(100) PRIMARY KEY,
@@ -618,11 +720,15 @@ INSERT INTO channel_categories VALUES
 ('UC0C-w0YjGpqDXGB8IHb662A', 'Ed Sheeran', 'Music', 'Pop', 'United Kingdom', true, '2021-01-01'),
 ('UCiMhD4jzUqG-IgPzUmmytRQ', 'Queen Official', 'Music', 'Rock', 'United Kingdom', true, '2021-01-01');
 "
+```
 
-# В ClickHouse: проверка автоматического отображения новой таблицы
+<img src="../screenshots/hw19_postgresql-integration/13_01_clickhouse_postgres_multiple_tables.png" width="1000" alt="Работа с несколькими таблицами через PostgreSQL базу данных">
+
+```sql
+-- В ClickHouse: проверка автоматического отображения новой таблицы
 SHOW TABLES FROM youtube_postgres_db;
 
-# Соединение таблиц через PostgreSQL базу данных
+-- Соединение таблиц через PostgreSQL базу данных
 SELECT 
     v.title,
     v.uploader,
@@ -632,10 +738,11 @@ SELECT
     v.like_count
 FROM youtube_postgres_db.youtube_videos v
 JOIN youtube_postgres_db.channel_categories c ON v.uploader_id = c.uploader_id
-ORDER BY v.view_count DESC;
+ORDER BY v.view_count DESC
+LIMIT 10;
 ```
 
-<img src="../screenshots/hw19_postgresql-integration/13_clickhouse_postgres_multiple_tables.png" width="800" alt="Работа с несколькими таблицами через PostgreSQL базу данных">
+<img src="../screenshots/hw19_postgresql-integration/13_02_clickhouse_postgres_multiple_tables.png" width="1000" alt="Работа с несколькими таблицами через PostgreSQL базу данных">
 
 <p><i>На скриншоте показано автоматическое отображение новых таблиц PostgreSQL в ClickHouse базе данных и выполнение соединений между таблицами.</i></p>
 
@@ -646,9 +753,9 @@ ORDER BY v.view_count DESC;
 ```sql
 -- Сравнение производительности различных методов доступа
 
--- 1. Через функцию postgres
+-- 1. Через функцию postgresql
 SELECT count(*) 
-FROM postgres('postgres:5432', 'youtube_data', 'youtube_videos', 'clickhouse_user', 'clickhouse_password')
+FROM postgresql('postgres:5432', 'youtube_data', 'youtube_videos', 'clickhouse_user', 'clickhouse_password')
 WHERE view_count > 1000000;
 
 -- 2. Через таблицу с движком PostgreSQL  
@@ -660,7 +767,11 @@ WHERE view_count > 1000000;
 SELECT count(*)
 FROM youtube_postgres_db.youtube_videos
 WHERE view_count > 1000000;
+```
 
+<img src="../screenshots/hw19_postgresql-integration/14_01_clickhouse_postgres_performance.png" width="1000" alt="Анализ производительности интеграции ClickHouse-PostgreSQL">
+
+```sql
 -- Анализ плана выполнения запроса
 EXPLAIN 
 SELECT uploader, sum(view_count) as total_views
@@ -668,11 +779,16 @@ FROM youtube_postgres_db.youtube_videos
 GROUP BY uploader
 ORDER BY total_views DESC
 LIMIT 5;
+```
 
+<img src="../screenshots/hw19_postgresql-integration/14_02_clickhouse_postgres_performance.png" width="600" alt="Анализ производительности интеграции ClickHouse-PostgreSQL">
+
+```sql
 -- Создание материализованного представления для кеширования
-CREATE MATERIALIZED VIEW youtube_summary_cached
+CREATE MATERIALIZED VIEW youtube_summary_cached ON CLUSTER dwh_test
 ENGINE = MergeTree()
 ORDER BY total_views
+SETTINGS allow_nullable_key = 1
 AS SELECT 
     uploader,
     count(*) as video_count,
@@ -685,18 +801,20 @@ WHERE dislike_count > 0
 GROUP BY uploader;
 
 -- Проверка материализованного представления
-SELECT * FROM youtube_summary_cached ORDER BY total_views DESC;
+SELECT * FROM youtube_summary_cached ORDER BY total_views DESC LIMIT 5;
 ```
 
-<img src="../screenshots/hw19_postgresql-integration/14_clickhouse_postgres_performance.png" width="800" alt="Анализ производительности интеграции ClickHouse-PostgreSQL">
+> **Примечание:** Настройка `SETTINGS allow_nullable_key = 1` необходима, так как атрибут `total_views` (результат `sum(view_count)`) может содержать NULL, если все значения `view_count` для группы равны NULL. Движок MergeTree по умолчанию не разрешает NULL в ключе сортировки (`ORDER BY`). Эта настройка позволяет движку обрабатывать такие случаи, считая NULL равным значению по умолчанию (0 для чисел) при сортировке.
+
+<img src="../screenshots/hw19_postgresql-integration/14_03_clickhouse_postgres_performance.png" width="800" alt="Анализ производительности интеграции ClickHouse-PostgreSQL">
 
 <p><i>На скриншоте показано сравнение производительности различных методов доступа к данным PostgreSQL и создание материализованного представления для кеширования результатов.</i></p>
 
 ---
 
-## Критерии оценки
+## Проверка выполнения критериев по заданию
 
-Задание считается выполненным, если:
+В рамках настоящей работы было выполнено следующее:
 
 ✅ **Настроена интеграция ClickHouse с PostgreSQL** - продемонстрировано подключение и доступ к данным PostgreSQL
 
@@ -736,8 +854,6 @@ SELECT * FROM youtube_summary_cached ORDER BY total_views DESC;
 ### Дополнительные материалы
 - **[YouTube Dataset](https://clickhouse.com/docs/getting-started/example-datasets/youtube-dislikes)** - описание используемого датасета
 - **[ClickHouse Integrations Overview](https://clickhouse.com/docs/en/integrations/)** - обзор всех интеграций ClickHouse
-- **[Performance Optimization](https://clickhouse.com/docs/en/operations/optimization)** - оптимизация производительности запросов
 
 ### Практические руководства
 - **[External Data Sources](https://clickhouse.com/docs/en/engines/table-engines/integrations/)** - работа с внешними источниками данных
-- **[Data Integration Patterns](https://clickhouse.com/blog/real-time-analytics-with-external-data)** - паттерны интеграции данных

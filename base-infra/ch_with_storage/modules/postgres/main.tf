@@ -37,6 +37,12 @@ resource "docker_container" "postgres" {
     name    = docker_network.postgres_network[0].name
     aliases = ["postgres"]
   }
+  dynamic "networks_advanced" {
+    for_each = var.clickhouse_network_name != "" ? [var.clickhouse_network_name] : []
+    content {
+      name = networks_advanced.value
+    }
+  }
   env = [
     "POSTGRES_USER=postgres",
     "POSTGRES_PASSWORD=${local.effective_postgres_superuser_password}"
