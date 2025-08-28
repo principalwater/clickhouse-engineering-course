@@ -1,8 +1,12 @@
+import sys
+import os
+sys.path.append('/opt/airflow')
+
 from datetime import datetime, timedelta
 from airflow import DAG
 from airflow.operators.python import PythonOperator
-from covid_producer import CovidDataProducer
-import os
+from airflow.models import Variable
+from utils.covid_producer import CovidDataProducer
 
 # Настройки по умолчанию для DAG
 default_args = {
@@ -18,24 +22,31 @@ default_args = {
 
 def produce_new_cases_data(**context):
     """
-    Отправляет батч новых случаев COVID-19 в Kafka топик covid_new_cases_1min
-    
-    Данные включают:
-    - date: дата записи
-    - location_key: код страны/региона  
-    - new_confirmed: новые подтвержденные случаи
-    - new_deceased: новые смертельные случаи
-    - new_recovered: новые выздоровевшие
-    - new_tested: новые проведенные тесты
+    Отправляет батч новых случаев COVID-19 в Kafka топик covid_new_cases_1min,
+    используя "водяной знак" (watermark) для инкрементальной загрузки.
     """
     try:
         # Получаем параметры из контекста или используем значения по умолчанию
-        broker_url = context.get('params', {}).get('broker_url', 'kafka:9092')
-        batch_size = context.get('params', {}).get('batch_size', 8)
-        topic = context.get('params', {}).get('topic', 'covid_new_cases_1min')
-        use_real_data = context.get('params', {}).get('use_real_data', False)
-        locations_filter = context.get('params', {}).get('locations_filter', 
-                                                         ['US', 'GB', 'DE', 'FR', 'IT', 'ES', 'RU', 'CN'])
+        params = context.get('params', {})
+        broker_url = params.get('broker_url', 'kafka:9092')
+        batch_size = params.get('batch_size', 8)
+        topic = params.get('topic', 'covid_new_cases_1min')
+        use_real_data = params.get('use_real_data', False)
+        # Получаем фильтр из конфига, если его нет - из параметров дага по умолчанию
+        locations_filter = params.get('locations_filter', context['dag'].params.get('locations_filter'))
+
+        # --- Логика инкрементальной загрузки (только для реальных данных) ---
+        last_processed_date = None
+        last_date_variable_name = f"{context['dag'].dag_id}_last_date"
+        if use_real_data:
+            # Приоритет №1: ручной запуск с указанием даты
+            manual_watermark = params.get('initial_watermark_date')
+            if manual_watermark:
+                print(f"   💧 Используется ручной Watermark, заданный при запуске: {manual_watermark}")
+                last_processed_date = manual_watermark
+            else:
+                # Приоритет №2: автоматическое получение из Airflow Variable
+                last_processed_date = Variable.get(last_date_variable_name, default_var=None)
         
         print(f"🚀 Запуск продьюсера новых случаев COVID-19")
         print(f"   Broker: {broker_url}")
@@ -43,39 +54,48 @@ def produce_new_cases_data(**context):
         print(f"   Batch size: {batch_size}")
         print(f"   Real data: {use_real_data}")
         print(f"   Locations filter: {locations_filter}")
+        if use_real_data and last_processed_date:
+            print(f"   💧 Watermark (загрузка после даты): {last_processed_date}")
         
         # Создаем продьюсер
         producer = CovidDataProducer(
             broker_url=broker_url,
             use_real_data=use_real_data,
-            data_limit=2000  # Загружаем достаточно данных для цикличной работы
+            data_limit=2000,  # Загружаем достаточно данных для цикличной работы
+            start_date=last_processed_date, # Будет None, если use_real_data=False
+            locations_filter=locations_filter if use_real_data else None
         )
         
         # Отправляем батч новых случаев
-        sent_count = producer.send_daily_data_batch(
+        sent_count, max_date_in_batch = producer.send_daily_data_batch(
             topic=topic,
             batch_size=batch_size,
             locations_filter=locations_filter
         )
         
-        # Получаем статистику продьюсера
         stats = producer.get_stats()
-        
-        # Закрываем продьюсер
         producer.close()
         
         print(f"✅ Успешно отправлено {sent_count} сообщений в топик {topic}")
         
-        # Возвращаем результат для XCom и мониторинга
+        # --- Обновление "водяного знака" (только для реальных данных) ---
+        if use_real_data and max_date_in_batch and max_date_in_batch != last_processed_date:
+            print(f"   💧 Обновление Watermark на новую дату: {max_date_in_batch}")
+            Variable.set(last_date_variable_name, max_date_in_batch)
+        elif use_real_data:
+            print(f"   💧 Watermark не изменился ({last_processed_date}). Новых данных нет.")
+
         return {
             'sent_count': sent_count,
             'topic': topic,
             'batch_size': batch_size,
             'data_type': 'new_cases',
             'timestamp': datetime.now().isoformat(),
-            'locations_count': len(locations_filter),
+            'locations_count': len(locations_filter) if locations_filter else 0,
             'producer_stats': stats,
-            'broker_url': broker_url
+            'broker_url': broker_url,
+            'last_processed_date': last_processed_date,
+            'new_watermark': max_date_in_batch
         }
         
     except Exception as e:
@@ -162,7 +182,8 @@ dag = DAG(
         'topic': 'covid_new_cases_1min', 
         'batch_size': 8,
         'use_real_data': False,  # По умолчанию используем тестовые данные
-        'locations_filter': ['US', 'GB', 'DE', 'FR', 'IT', 'ES', 'RU', 'CN', 'JP', 'KR']
+        'locations_filter': ['US', 'GB', 'DE', 'FR', 'IT', 'ES', 'RU', 'CN', 'JP', 'KR'],
+        'initial_watermark_date': None, # Установить вручную дату (YYYY-MM-DD) для начала загрузки
     },
     doc_md="""
     ## COVID-19 New Cases Producer DAG (1min)
@@ -183,6 +204,13 @@ dag = DAG(
     - **batch_size**: размер батча (по умолчанию: 8 сообщений)
     - **use_real_data**: использовать реальные данные COVID-19 (по умолчанию: False)
     - **locations_filter**: список кодов стран для отправки
+    - **initial_watermark_date**: установить дату (YYYY-MM-DD) для начала загрузки вручную. Имеет приоритет над автоматическим вотермарком.
+
+    ### Инкрементальная загрузка (Watermark):
+    При использовании реальных данных (`use_real_data: true`), DAG автоматически отслеживает
+    последнюю обработанную дату с помощью Airflow Variable `covid_new_cases_1min_last_date`.
+    При каждом запуске он загружает только те записи, которые новее этой даты,
+    чтобы избежать дублирования данных.
     
     ### Пример JSON сообщения:
     ```json

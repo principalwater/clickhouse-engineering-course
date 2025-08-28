@@ -1,0 +1,23 @@
+import os
+from datetime import timedelta
+
+# SECRET_KEY конфигурация
+SECRET_KEY = "${superset_secret_key}"
+
+# Безопасность
+WTF_CSRF_ENABLED = True
+WTF_CSRF_TIME_LIMIT = None
+
+# Кэш
+CACHE_CONFIG = {
+    'CACHE_TYPE': 'simple',
+    'CACHE_DEFAULT_TIMEOUT': 300
+}
+
+# Дополнительные настройки
+SUPERSET_WEBSERVER_TIMEOUT = 60
+SUPERSET_WORKERS = 4
+SQLLAB_TIMEOUT = 300
+
+# Настройки для подключения к ClickHouse
+# (подключение к ClickHouse настраивается через UI)

@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import List, Dict, Optional
 from kafka import KafkaProducer
 from kafka.errors import NoBrokersAvailable, KafkaError
-from covid_schemas import (
+from .covid_schemas import (
     load_covid_real_data, 
     load_covid_sample_data, 
     get_daily_record, 
@@ -26,7 +26,9 @@ class CovidDataProducer:
     def __init__(self, 
                  broker_url: str = 'kafka:9092',
                  use_real_data: bool = True,
-                 data_limit: int = 1000):
+                 data_limit: int = 1000,
+                 start_date: str = None,
+                 locations_filter: List[str] = None):
         """
         Инициализация продьюсера
         
@@ -34,10 +36,14 @@ class CovidDataProducer:
             broker_url: URL Kafka брокера
             use_real_data: Использовать реальные данные (True) или тестовые (False)
             data_limit: Количество записей для загрузки
+            start_date: Дата, с которой начинать загрузку (не включительно)
+            locations_filter: Список кодов стран для фильтрации на лету.
         """
         self.broker_url = broker_url
         self.use_real_data = use_real_data
         self.data_limit = data_limit
+        self.start_date = start_date
+        self.locations_filter = locations_filter
         
         print(f"🚀 Инициализация CovidDataProducer")
         print(f"   Broker: {broker_url}")
@@ -93,8 +99,13 @@ class CovidDataProducer:
     def _load_data(self) -> List[Dict]:
         """Загружает данные COVID-19"""
         if self.use_real_data:
-            return load_covid_real_data(limit=self.data_limit)
+            return load_covid_real_data(
+                limit=self.data_limit, 
+                start_date=self.start_date,
+                locations_filter=self.locations_filter
+            )
         else:
+            # Для тестовых данных start_date не применяется
             return load_covid_sample_data(limit=self.data_limit)
     
     def _send_message(self, topic: str, message: Dict, key: Optional[str] = None) -> bool:
@@ -134,7 +145,7 @@ class CovidDataProducer:
     def send_daily_data_batch(self, 
                               topic: str = 'covid_daily_1min', 
                               batch_size: int = 10,
-                              locations_filter: List[str] = None) -> int:
+                              locations_filter: List[str] = None) -> (int, Optional[str]):
         """
         Отправляет батч новых случаев COVID-19 в топик
         
@@ -144,12 +155,18 @@ class CovidDataProducer:
             locations_filter: Фильтр по локациям
         
         Returns:
-            int: Количество успешно отправленных сообщений
+            (int, str): Кортеж (количество отправленных сообщений, максимальная дата в батче)
         """
         print(f"📤 Отправка батча новых случаев COVID-19 (размер: {batch_size})")
+
+        # Если после фильтрации не осталось данных, отправлять нечего.
+        if not self.data_source:
+            print("   ... источник данных пуст, отправлять нечего.")
+            return 0, None
         
         sent_count = 0
         batch_data = []
+        max_date = None
         
         # Собираем батч данных
         attempts = 0
@@ -163,8 +180,9 @@ class CovidDataProducer:
             self.data_index += 1
             attempts += 1
             
-            # Фильтрация по локациям
-            if locations_filter and record['location_key'] not in locations_filter:
+            # Фильтрация по локациям теперь происходит на этапе загрузки,
+            # но мы оставим эту проверку для тестовых данных.
+            if not self.use_real_data and locations_filter and record['location_key'] not in locations_filter:
                 continue
                 
             daily_record = get_daily_record(record)
@@ -174,10 +192,15 @@ class CovidDataProducer:
         for record in batch_data:
             if self._send_message(topic, record):
                 sent_count += 1
+                # Обновляем максимальную дату
+                if max_date is None or record['date'] > max_date:
+                    max_date = record['date']
         
         self.producer.flush()
         print(f"📊 Отправлено {sent_count}/{len(batch_data)} сообщений новых случаев")
-        return sent_count
+        if max_date:
+            print(f"   Максимальная дата в батче: {max_date}")
+        return sent_count, max_date
     
     def send_cumulative_data_batch(self, 
                                    topic: str = 'covid_cumulative_5min', 
@@ -192,9 +215,14 @@ class CovidDataProducer:
             locations_filter: Фильтр по локациям
         
         Returns:
-            int: Количество успешно отправленных сообщений
+            (int, str): Кортеж (количество отправленных сообщений, максимальная дата в батче)
         """
-        print(f"📤 Отправка батча накопительных данных COVID-19 (размер: {batch_size})")
+        print(f"📤 Отправка батча новых случаев COVID-19 (размер: {batch_size})")
+
+        # Если после фильтрации не осталось данных, отправлять нечего.
+        if not self.data_source:
+            print("   ... источник данных пуст, отправлять нечего.")
+            return 0, None
         
         sent_count = 0
         batch_data = []

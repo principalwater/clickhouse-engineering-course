@@ -131,7 +131,7 @@ locals {
     "AIRFLOW__CORE__STANDALONE_DAG_PROCESSOR=true",
     "AIRFLOW__CELERY__WORKER_CONCURRENCY=16",
     "AIRFLOW__CELERY__WORKER_ENABLE_REMOTE_CONTROL=false",
-    "_PIP_ADDITIONAL_REQUIREMENTS=clickhouse-connect>=0.7.0 python-dotenv>=1.0.0 requests>=2.31.0 kafka-python>=2.0.2 apache-airflow-providers-dbt-cloud>=1.0.0 dbt-core==1.10.7 dbt-clickhouse==1.9.2 psutil>=5.9.0 docker>=6.0.0 apache-airflow-providers-telegram==4.8.2",
+    "_PIP_ADDITIONAL_REQUIREMENTS=${join(" ", [for line in split("\n", file("${var.airflow_dags_path}/requirements.txt")) : trimspace(line) if trimspace(line) != "" && !startswith(trimspace(line), "#") && !startswith(trimspace(line), "apache-airflow")])}",
     "AIRFLOW_CONFIG=/opt/airflow/config/airflow.cfg",
     "_AIRFLOW_DB_MIGRATE=true",
     # ClickHouse переменные для backup операций
@@ -159,7 +159,7 @@ locals {
   airflow_common_volumes = var.deploy_airflow ? [
     {
       host_path      = abspath(var.airflow_dags_path)
-      container_path = "/opt/airflow/dags"
+      container_path = "/opt/airflow"
     },
     {
       host_path      = abspath(var.airflow_logs_path)

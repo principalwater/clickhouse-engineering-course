@@ -1,8 +1,11 @@
+import sys
+import os
+sys.path.append('/opt/airflow')
+
 from datetime import datetime, timedelta
 from airflow import DAG
 from airflow.operators.python import PythonOperator
-from covid_producer import CovidDataProducer
-import os
+from utils.covid_producer import CovidDataProducer
 
 # Настройки по умолчанию для DAG
 default_args = {
@@ -34,8 +37,8 @@ def produce_cumulative_data(**context):
         batch_size = context.get('params', {}).get('batch_size', 5)
         topic = context.get('params', {}).get('topic', 'covid_cumulative_data_5min')
         use_real_data = context.get('params', {}).get('use_real_data', False)
-        locations_filter = context.get('params', {}).get('locations_filter', 
-                                                         ['US', 'GB', 'DE', 'FR', 'IT', 'ES', 'RU'])
+        params = context.get('params') or {}
+        locations_filter = params.get('locations_filter')
         
         print(f"🚀 Запуск продьюсера накопительных данных COVID-19")
         print(f"   Broker: {broker_url}")
@@ -73,7 +76,7 @@ def produce_cumulative_data(**context):
             'batch_size': batch_size,
             'data_type': 'cumulative',
             'timestamp': datetime.now().isoformat(),
-            'locations_count': len(locations_filter),
+            'locations_count': len(locations_filter) if locations_filter else 0,
             'producer_stats': stats,
             'broker_url': broker_url
         }
