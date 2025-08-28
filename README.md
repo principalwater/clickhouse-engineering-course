@@ -39,6 +39,7 @@
 16) [Загрузка данных в ClickHouse](./hw16_data-loading)
 17) [Интеграция с Apache Kafka](./hw17_kafka-integration)
 18) [Интеграция с BI-инструментами](./hw18_bi-integration)
+19) [Интеграция с PostgreSQL](./hw19_postgresql-integration)
 
 **Дополнительно:**
 - [Инфраструктурные модули и сценарии автоматизации (Terraform, Docker, ClickHouse)](./base-infra)
@@ -115,6 +116,7 @@ This repository is equipped with a production-ready CI/CD pipeline powered by Gi
 16) [Data Loading to ClickHouse](./hw16_data-loading)
 17) [Apache Kafka Integration](./hw17_kafka-integration)
 18) [BI Tools Integration](./hw18_bi-integration)
+19) [PostgreSQL Integration](./hw19_postgresql-integration)
 
 **Additionally:**
 - [Infrastructure modules and automation scripts (Terraform, Docker, ClickHouse)](./base-infra)
