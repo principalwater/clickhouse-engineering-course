@@ -289,3 +289,34 @@ module "airflow" {
 
   depends_on = [module.postgres]
 }
+
+# --- BI Tools Module ---
+module "bi_tools" {
+  source = "./modules/bi-tools"
+  count  = var.enable_bi_tools ? 1 : 0
+
+  # Network configuration
+  postgres_network_name = module.postgres.postgres_network_name
+
+  # User credentials
+  super_user_name     = var.super_user_name
+  super_user_password = var.super_user_password
+  bi_user_name        = var.bi_user_name
+  bi_user_password    = var.bi_user_password
+
+  # Service flags
+  enable_metabase = var.enable_metabase
+  enable_superset = var.enable_superset
+
+  # PostgreSQL settings (используются из основного пайплайна)
+  metabase_pg_user     = var.metabase_pg_user
+  metabase_pg_password = var.metabase_pg_password
+  metabase_pg_db       = var.metabase_pg_db
+
+  superset_pg_user     = var.superset_pg_user
+  superset_pg_password = var.superset_pg_password
+  superset_pg_db       = var.superset_pg_db
+  superset_secret_key  = var.superset_secret_key
+
+  depends_on = [module.postgres]
+}

@@ -396,4 +396,18 @@ variable "enable_kafka_acl" {
   default     = false
 }
 
+# --- BI Tools Configuration ---
+variable "enable_bi_tools" {
+  description = "Включить модуль BI инструментов (Metabase + Superset)"
+  type        = bool
+  default     = false
+}
+
+# Superset секретный ключ
+variable "superset_secret_key" {
+  description = "Secret key для Superset (32-байтовый base64-encoded ключ)"
+  type        = string
+  sensitive   = true
+}
+
 
