@@ -38,6 +38,7 @@
 15) [Профилирование запросов](./hw15_query-profiling)
 16) [Загрузка данных в ClickHouse](./hw16_data-loading)
 17) [Интеграция с Apache Kafka](./hw17_kafka-integration)
+18) [Интеграция с BI-инструментами](./hw18_bi-integration)
 
 **Дополнительно:**
 - [Инфраструктурные модули и сценарии автоматизации (Terraform, Docker, ClickHouse)](./base-infra)
@@ -113,6 +114,7 @@ This repository is equipped with a production-ready CI/CD pipeline powered by Gi
 15) [Query Profiling](./hw15_query-profiling)
 16) [Data Loading to ClickHouse](./hw16_data-loading)
 17) [Apache Kafka Integration](./hw17_kafka-integration)
+18) [BI Tools Integration](./hw18_bi-integration)
 
 **Additionally:**
 - [Infrastructure modules and automation scripts (Terraform, Docker, ClickHouse)](./base-infra)
