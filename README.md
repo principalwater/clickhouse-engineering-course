@@ -40,6 +40,7 @@
 17) [Интеграция с Apache Kafka](./hw17_kafka-integration)
 18) [Интеграция с BI-инструментами](./hw18_bi-integration)
 19) [Интеграция с PostgreSQL](./hw19_postgresql-integration)
+20) [Проектная работа по теме «Проектирование масштабируемой аналитической платформы для рынка электроэнергии на базе ClickHouse»](https://github.com/principalwater/clickhouse-energyhub)
 
 **Дополнительно:**
 - [Инфраструктурные модули и сценарии автоматизации (Terraform, Docker, ClickHouse)](./base-infra)
@@ -117,6 +118,7 @@ This repository is equipped with a production-ready CI/CD pipeline powered by Gi
 17) [Apache Kafka Integration](./hw17_kafka-integration)
 18) [BI Tools Integration](./hw18_bi-integration)
 19) [PostgreSQL Integration](./hw19_postgresql-integration)
+20) [Final Project: Designing a Scalable Analytics Platform for Power Market Leveraging ClickHouse](https://github.com/principalwater/clickhouse-energyhub)
 
 **Additionally:**
 - [Infrastructure modules and automation scripts (Terraform, Docker, ClickHouse)](./base-infra)
