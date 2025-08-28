@@ -10,6 +10,8 @@
 - [Этап 2: Создание Kafka топика и ClickHouse таблиц](#этап-2-создание-kafka-топика-и-clickhouse-таблиц)
 - [Этап 3: Подключение к ClickHouse](#этап-3-подключение-к-clickhouse)
 - [Этап 4: Создание дашборда с 5 визуализациями](#этап-4-создание-дашборда-с-5-визуализациями)
+- [Выводы и результаты](#выводы-и-результаты)
+- [Полезные источники и дальнейшее изучение](#полезные-источники-и-дальнейшее-изучение)
 
 ---
 
@@ -658,37 +660,41 @@ LIMIT 10;
 2. Войдите в систему используя логин/пароль: `admin/admin`
 3. Перейдите в меню **Settings** → **Database Connections**
 4. Нажмите кнопку **+ Database** для добавления нового подключения
-5. Выберите **ClickHouse** из списка доступных баз данных
+5. Выберите **ClickHouse Connect (Superset)** из списка доступных баз данных
 
-**Параметры подключения:**
-- **Display Name**: `ClickHouse Environmental Sensors`
-- **SQLAlchemy URI**: `clickhousedb://bi_user:password@clickhouse-01:8123/default`
-- **Allow DML**: Снять галочку (для безопасности)
-- **Allow file uploads**: Снять галочку
-- **Expose database in SQL Lab**: Поставить галочку
+**Параметры подключения (Step 2 of 3):**
 
-**Дополнительные настройки (Advanced):**
-```json
-{
-  "metadata_params": {},
-  "engine_params": {
-    "pool_timeout": 10,
-    "pool_recycle": 3600,
-    "pool_pre_ping": true,
-    "max_overflow": 0
-  },
-  "metadata_cache_timeout": {},
-  "schemas_allowed_for_file_upload": []
-}
+| Поле | Значение | Описание |
+|------|----------|-----------|
+| **HOST** | `host.docker.internal` | Имя хоста ClickHouse сервера |
+| **PORT** | `8123` | HTTP порт ClickHouse |
+| **DATABASE NAME** | `otus_default` | Имя базы данных для подключения |
+| **USERNAME** | `bi_user` | Пользователь для доступа к ClickHouse |
+| **PASSWORD** | `password` | Пароль пользователя |
+| **DISPLAY NAME** | `ClickHouse Environmental Sensors` | Отображаемое имя подключения в Superset |
+
+**Дополнительные параметры:**
+- **ADDITIONAL PARAMETERS**: оставить пустым
+- **SSL**: не включать (для локального развертывания)
+
+**Альтернативный способ через SQLAlchemy URI:**
+Если предпочитаете использовать строку подключения, выберите опцию **"Connect this database with a SQLAlchemy URI string instead"** и укажите:
 ```
+clickhousedb://bi_user:password@clickhouse-01:8123/default
+```
+
+**Настройки безопасности:**
+- **Allow DML**: Снять галочку (для безопасности)
+- **Allow file uploads**: Снять галочку  
+- **Expose database in SQL Lab**: Поставить галочку
 
 ### 3.2 Тестирование подключения
 
-После ввода параметров нажмите кнопку **Test Connection** для проверки доступности ClickHouse.
+После ввода параметров и доступности ClickHouse подключение будет успешно добавлено.
 
-<img src="../screenshots/hw18_bi-integration/12_superset_clickhouse_connection.png" width="800" alt="Настройка подключения к ClickHouse в Apache Superset">
+<img src="../screenshots/hw18_bi-integration/12_01_superset_clickhouse_connection.png" width="1000" alt="Настройка подключения к ClickHouse в Apache Superset">
 
-<p><i>На скриншоте показан процесс настройки подключения к ClickHouse в Superset с указанием SQLAlchemy URI и успешным результатом тестирования подключения.</i></p>
+<img src="../screenshots/hw18_bi-integration/12_02_superset_clickhouse_connection.png" width="1000" alt="Настройка подключения к ClickHouse в Apache Superset">
 
 ### 3.3 Проверка доступности таблиц
 
@@ -707,9 +713,7 @@ SELECT
 FROM raw.sensors;
 ```
 
-<img src="../screenshots/hw18_bi-integration/13_superset_sql_lab_test.png" width="800" alt="Тестирование подключения к ClickHouse через SQL Lab">
-
-<p><i>На скриншоте показан успешный тестовый запрос в SQL Lab с результатами статистики по таблице sensors: общее количество записей, типы сенсоров и временной диапазон данных.</i></p>
+<img src="../screenshots/hw18_bi-integration/13_superset_sql_lab_test.png" width="1000" alt="Тестирование подключения к ClickHouse через SQL Lab">
 
 ## Этап 4: Создание дашборда с 5 визуализациями
 
@@ -730,12 +734,144 @@ FROM raw.sensors;
 
 1. Перейдите в **Dashboards** → **+ Dashboard**
 2. Задайте название: `"Environmental Sensors Monitoring Dashboard"`
-3. Добавьте описание: `"Real-time monitoring of environmental sensors data from Sensor.Community network"`
-4. Настройте параметры обновления: **Auto-refresh** каждые 5 минут
+3. Настройте параметры обновления: **Auto-refresh** каждые 5 минут
 
-### 4.3 Визуализация 1: Временная динамика качества воздуха (Time Series Chart)
+### 4.3 Создание Datasets для визуализаций
 
-#### 4.3.1 Бизнес-логика визуализации
+Перед созданием чартов необходимо настроить Datasets (источники данных) в Superset, которые будут использоваться для визуализаций.
+
+#### 4.3.1 Dataset для основных метрик sensors
+
+1. Перейдите в **Data** → **Datasets**
+2. Нажмите **+ Dataset** 
+3. Выберите:
+   - **Database**: ClickHouse Environmental Sensors
+   - **Schema**: raw
+   - **Table**: sensors
+4. Нажмите **Create Dataset and Create Chart**
+
+**Альтернативно, создание Dataset через SQL:**
+1. Перейдите в **Data** → **Datasets**
+2. Нажмите **+ Dataset**
+3. Выберите **Database**: ClickHouse Environmental Sensors
+4. Включите **"From SQL"** и введите:
+
+```sql
+SELECT 
+    sensor_id,
+    sensor_type,
+    location,
+    lat,
+    lon,
+    timestamp,
+    P1,
+    P2,
+    pressure,
+    temperature,
+    humidity
+FROM raw.sensors
+WHERE timestamp >= now() - INTERVAL 30 DAY
+```
+
+5. Задайте имя Dataset: `sensors_recent_data`
+
+#### 4.3.2 Dataset для агрегированных данных по часам
+
+Создайте дополнительный Dataset для почасовой аналитики:
+
+```sql
+SELECT 
+    toStartOfHour(timestamp) as hour,
+    sensor_type,
+    count(*) as measurements_count,
+    avg(P2) as avg_pm25,
+    avg(P1) as avg_pm10,
+    avg(temperature) as avg_temperature,
+    avg(humidity) as avg_humidity,
+    avg(pressure) as avg_pressure
+FROM raw.sensors
+WHERE timestamp >= now() - INTERVAL 7 DAY
+GROUP BY hour, sensor_type
+ORDER BY hour DESC
+```
+
+Имя Dataset: `sensors_hourly_aggregates`
+
+#### 4.3.3 Dataset для геолокационных данных
+
+Создайте Dataset для географических визуализаций:
+
+```sql
+SELECT 
+    lat,
+    lon,
+    sensor_type,
+    sensor_id,
+    location,
+    avg(P2) as avg_pm25,
+    avg(temperature) as avg_temp,
+    count(*) as measurements_count,
+    max(timestamp) as last_measurement
+FROM raw.sensors
+WHERE lat != 0 AND lon != 0
+    AND timestamp >= now() - INTERVAL 24 HOUR
+GROUP BY lat, lon, sensor_type, sensor_id, location
+HAVING measurements_count >= 5
+```
+
+Имя Dataset: `sensors_geographic_data`
+
+#### 4.3.4 Dataset для корреляционного анализа
+
+Создайте Dataset для анализа корреляций между параметрами:
+
+```sql
+WITH hourly_stats AS (
+    SELECT 
+        toStartOfHour(timestamp) as hour,
+        avg(temperature) as avg_temp,
+        avg(humidity) as avg_humidity,
+        avg(P1) as avg_pm10,
+        avg(P2) as avg_pm25,
+        avg(pressure) as avg_pressure
+    FROM raw.sensors
+    WHERE timestamp >= now() - INTERVAL 14 DAY
+        AND temperature IS NOT NULL
+        AND humidity IS NOT NULL
+        AND P2 IS NOT NULL
+        AND pressure IS NOT NULL
+    GROUP BY hour
+    HAVING count(*) >= 10
+)
+SELECT * FROM hourly_stats
+ORDER BY hour
+```
+
+Имя Dataset: `sensors_correlation_data`
+
+#### 4.3.5 Настройка Datasets
+
+После создания каждого Dataset:
+
+1. **Настройте поля времени**: 
+   - Для `sensors_recent_data`: установите `timestamp` как **Temporal Column**
+   - Для `sensors_hourly_aggregates`: установите `hour` как **Temporal Column**
+
+2. **Настройте метрики по умолчанию**:
+   - Добавьте `count(*)` как базовую метрику
+   - Настройте агрегации для числовых полей (AVG, SUM, MAX, MIN)
+
+3. **Проверьте типы данных**:
+   - Убедитесь, что числовые поля имеют правильный тип (Numeric)
+   - Временные поля должны быть типа DateTime/Date
+
+4. **Сохраните изменения** в каждом Dataset
+
+Теперь Datasets готовы для создания визуализаций в следующих разделах.
+
+### 4.4 Визуализация 1: Временная динамика качества воздуха (Time Series Chart)
+
+#### 4.4.1 Бизнес-логика визуализации
 
 **Назначение:** Мониторинг изменения концентрации вредных частиц PM2.5 во времени для оценки трендов загрязнения воздуха.
 
@@ -745,7 +881,7 @@ FROM raw.sensors;
 - Прогнозирование экологических рисков для здоровья населения
 - Корреляция с внешними факторами (погода, трафик, промышленная активность)
 
-#### 4.3.2 Создание визуализации
+#### 4.4.2 Создание визуализации
 
 **Шаги в Superset:**
 1. **Charts** → **+ Chart**
@@ -776,66 +912,56 @@ ORDER BY time;
 - **Show Legend:** `True`
 - **Tooltip Format:** `".2f"`
 
-<img src="../screenshots/hw18_bi-integration/14_time_series_pm25_chart.png" width="800" alt="Временная динамика концентрации PM2.5">
+<img src="../screenshots/hw18_bi-integration/14_time_series_pm25_chart.png" width="1000" alt="Временная динамика концентрации PM2.5">
 
 <p><i>На графике показана почасовая динамика средней концентрации частиц PM2.5 за последние 7 дней. Видны суточные колебания с пиками в утренние и вечерние часы, что соответствует периодам повышенной транспортной активности.</i></p>
 
-### 4.4 Визуализация 2: Географическое распределение сенсоров (Deck.gl Scatterplot)
-
-#### 4.4.1 Бизнес-логика визуализации
-
-**Назначение:** Геопространственный анализ распределения экологических сенсоров и выявление географических особенностей загрязнения.
-
-**Практическая ценность:**
-- Определение зон с наиболее высоким уровнем загрязнения
-- Планирование размещения новых сенсоров для лучшего покрытия
-- Выявление корреляции между географическим расположением и уровнем загрязнения
-- Поддержка принятия решений по экологической политике
-
-#### 4.4.2 Создание визуализации
-
-**SQL-запрос с агрегацией по регионам:**
-```sql
-SELECT
-    lat,
-    lon,
-    sensor_type,
-    avg(P2) AS avg_pm25,
-    avg(temperature) AS avg_temp,
-    avg(humidity) AS avg_humidity,
-    count(*) AS measurements_count,
-    -- Классификация уровня загрязнения по ВОЗ стандартам
-    CASE 
-        WHEN avg(P2) <= 15 THEN 'Good'
-        WHEN avg(P2) <= 25 THEN 'Moderate'  
-        WHEN avg(P2) <= 50 THEN 'Unhealthy for Sensitive Groups'
-        WHEN avg(P2) <= 75 THEN 'Unhealthy'
-        ELSE 'Very Unhealthy'
-    END AS air_quality_level
-FROM raw.sensors
-WHERE lat != 0 AND lon != 0
-    AND lat BETWEEN -90 AND 90
-    AND lon BETWEEN -180 AND 180
-    AND timestamp >= now() - INTERVAL 24 HOUR
-GROUP BY lat, lon, sensor_type
-HAVING measurements_count >= 10  -- минимум 10 измерений для статистической значимости
-ORDER BY avg_pm25 DESC;
-```
-
-**Настройки Deck.gl Scatterplot:**
-- **Longitude:** `lon`
-- **Latitude:** `lat`  
-- **Point Size:** `measurements_count` (размер точки = количество измерений)
-- **Point Color:** `avg_pm25` (цвет по уровню PM2.5)
-- **Color Scale:** `"RdYlGn_r"` (обратная: красный-желтый-зеленый)
-
-<img src="../screenshots/hw18_bi-integration/15_geographic_sensors_map.png" width="800" alt="Географическое распределение сенсоров с уровнями загрязнения">
-
-<p><i>На карте показано распределение сенсоров по всему миру с цветовой индикацией уровня загрязнения PM2.5. Размер точек отражает количество измерений, что помогает оценить надежность данных. Красные зоны указывают на области с повышенным загрязнением.</i></p>
-
-### 4.5 Визуализация 3: Распределение типов сенсоров и их эффективности (Sunburst Chart)
+### 4.5 Визуализация 2: Сравнение показателей по типам сенсоров (Bar Chart)
 
 #### 4.5.1 Бизнес-логика визуализации
+
+**Назначение:** Сравнительный анализ средних показаний различных типов экологических сенсоров для оценки общего состояния окружающей среды.
+
+**Практическая ценность:**
+- Сравнение различных параметров окружающей среды
+- Выявление наиболее критичных показателей загрязнения
+- Оценка общего экологического состояния
+- Планирование мониторинга приоритетных параметров
+
+#### 4.5.2 Создание визуализации
+
+**SQL-запрос для сравнения типов сенсоров:**
+```sql
+SELECT
+    sensor_type,
+    count(*) AS total_measurements,
+    round(avg(temperature), 1) AS avg_temperature,
+    round(avg(humidity), 1) AS avg_humidity,
+    round(avg(P2), 1) AS avg_pm25,
+    round(avg(P1), 1) AS avg_pm10
+FROM raw.sensors
+WHERE timestamp >= now() - INTERVAL 7 DAY
+GROUP BY sensor_type
+HAVING total_measurements >= 10
+ORDER BY sensor_type, avg_temperature DESC
+LIMIT 20;
+```
+
+**Настройки Bar Chart:**
+- **Chart Type:** Bar Chart  
+- **Dimensions:** sensor_type
+- **Metrics:** avg_temperature, avg_humidity, avg_pm25, avg_pm10
+- **Sort:** sensor_type ASC
+- **Color Scheme:** Categorical (Distinct colors for metrics)
+- **Orientation:** Vertical
+
+<img src="../screenshots/hw18_bi-integration/15_sensor_types_comparison.png" width="1000" alt="Сравнение показателей по типам сенсоров">
+
+<p><i>Столбчатая диаграмма показывает средние значения различных экологических параметров, сгруппированные по типам сенсоров. Разные цвета для каждой метрики помогают сравнивать температуру, влажность, PM2.5 и PM10. График позволяет оценить общую картину экологического мониторинга.</i></p>
+
+### 4.6 Визуализация 3: Распределение типов сенсоров и их эффективности (Sunburst Chart)
+
+#### 4.6.1 Бизнес-логика визуализации
 
 **Назначение:** Анализ структуры сенсорной сети и сравнение эффективности различных типов датчиков.
 
@@ -845,7 +971,7 @@ ORDER BY avg_pm25 DESC;
 - Планирование закупок и развертывания новых датчиков
 - Анализ качества данных по типам оборудования
 
-#### 4.5.2 Создание визуализации
+#### 4.6.2 Создание визуализации
 
 **SQL-запрос:**
 ```sql
@@ -873,13 +999,13 @@ ORDER BY total_measurements DESC;
 - **Secondary Metric:** `data_quality_index`
 - **Color Metric:** `data_quality_index`
 
-<img src="../screenshots/hw18_bi-integration/16_sensor_types_sunburst.png" width="800" alt="Распределение типов сенсоров по эффективности">
+<img src="../screenshots/hw18_bi-integration/16_sensor_types_sunburst.png" width="1000" alt="Распределение типов сенсоров по эффективности">
 
 <p><i>Солнечная диаграмма показывает структуру сенсорной сети по типам датчиков. Размер сегментов отражает количество измерений, а цвет - индекс качества данных. Наиболее эффективными оказались сенсоры BME280 и SDS011.</i></p>
 
-### 4.6 Визуализация 4: Корреляционная матрица экологических параметров (Heatmap)
+### 4.7 Визуализация 4: Корреляционная матрица экологических параметров (Heatmap)
 
-#### 4.6.1 Бизнес-логика визуализации
+#### 4.7.1 Бизнес-логика визуализации
 
 **Назначение:** Выявление взаимосвязей между различными экологическими параметрами для понимания факторов, влияющих на качество окружающей среды.
 
@@ -889,7 +1015,7 @@ ORDER BY total_measurements DESC;
 - Оптимизация алгоритмов калибровки сенсоров
 - Выявление аномальных значений и сбоев оборудования
 
-#### 4.6.2 Создание визуализации
+#### 4.7.2 Создание визуализации
 
 **SQL-запрос для корреляционного анализа:**
 ```sql
@@ -939,13 +1065,13 @@ ORDER BY abs(correlation) DESC;
 - **Metric:** `correlation`
 - **Color Scale:** `"RdBu_r"` (красный-белый-синий)
 
-<img src="../screenshots/hw18_bi-integration/17_correlation_heatmap.png" width="800" alt="Корреляционная матрица экологических параметров">
+<img src="../screenshots/hw18_bi-integration/17_correlation_heatmap.png" width="1000" alt="Корреляционная матрица экологических параметров">
 
 <p><i>Тепловая карта показывает корреляции между экологическими параметрами. Заметна сильная отрицательная корреляция между температурой и влажностью, а также умеренная положительная корреляция между PM2.5 и температурой, что указывает на влияние погодных условий на загрязнение воздуха.</i></p>
 
-### 4.7 Визуализация 5: Суточные паттерны загрязнения по типам сенсоров (Line Chart)
+### 4.8 Визуализация 5: Суточные паттерны загрязнения по типам сенсоров (Line Chart)
 
-#### 4.7.1 Бизнес-логика визуализации
+#### 4.8.1 Бизнес-логика визуализации
 
 **Назначение:** Анализ суточных циклов загрязнения воздуха для выявления закономерностей и планирования мероприятий по охране окружающей среды.
 
@@ -955,7 +1081,7 @@ ORDER BY abs(correlation) DESC;
 - Оптимизация работы транспорта и промышленности
 - Информирование населения о благоприятных периодах для активностей на свежем воздухе
 
-#### 4.7.2 Создание визуализации
+#### 4.8.2 Создание визуализации
 
 **SQL-запрос с анализом суточных паттернов:**
 ```sql
@@ -993,32 +1119,11 @@ ORDER BY hour_of_day, sensor_type;
 - **Line Style:** `"Solid"`
 - **Show Markers:** `True`
 
-<img src="../screenshots/hw18_bi-integration/18_hourly_pollution_patterns.png" width="800" alt="Суточные паттерны загрязнения по типам сенсоров">
+<img src="../screenshots/hw18_bi-integration/18_hourly_pollution_patterns.png" width="1000" alt="Суточные паттерны загрязнения по типам сенсоров">
 
 <p><i>График показывает суточные циклы концентрации PM2.5 для различных типов сенсоров. Четко видны два пика загрязнения: утренний (7-9 часов) и вечерний (17-19 часов), соответствующие часам пик транспортной активности. Различия между типами сенсоров минимальны, что подтверждает согласованность измерений.</i></p>
 
-### 4.8 Компоновка финального дашборда
-
-#### 4.8.1 Структура дашборда
-
-**Макет дашборда (grid layout):**
-```
-┌─────────────────────────┬─────────────────────────┐
-│   Time Series Chart     │    Geographic Map       │
-│   (PM2.5 Dynamics)      │   (Sensor Distribution) │
-│         12x6            │          12x6           │
-├─────────────────────────┼─────────────────────────┤
-│   Sunburst Chart        │   Correlation Heatmap   │
-│  (Sensor Types)         │  (Parameter Relations)  │
-│         8x6             │          8x6            │
-├─────────────────────────┴─────────────────────────┤
-│        Hourly Patterns Line Chart                 │
-│      (Daily Pollution Cycles by Sensor Type)      │
-│                     24x6                          │
-└───────────────────────────────────────────────────┘
-```
-
-#### 4.8.2 Настройки дашборда
+### 4.9 Компоновка финального дашборда
 
 **Глобальные фильтры:**
 - **Временной диапазон:** последние 7 дней (с возможностью изменения)
@@ -1031,13 +1136,15 @@ ORDER BY hour_of_day, sensor_type;
 - **Cache timeout:** 300 секунд
 - **Async queries:** включены для больших запросов
 
-<img src="../screenshots/hw18_bi-integration/19_complete_dashboard_overview.png" width="800" alt="Полный дашборд мониторинга экологических сенсоров">
+<img src="../screenshots/hw18_bi-integration/19_01_complete_dashboard_overview.png" width="1000" alt="Полный дашборд мониторинга экологических сенсоров">
+
+<img src="../screenshots/hw18_bi-integration/19_02_complete_dashboard_overview.png" width="1000" alt="Полный дашборд мониторинга экологических сенсоров">
 
 <p><i>Финальный дашборд объединяет все пять визуализаций в единую аналитическую панель для комплексного мониторинга экологической обстановки. Интерактивные фильтры позволяют детализировать анализ по различным измерениям данных.</i></p>
 
-### 4.9 Практическое применение дашборда
+### 4.10 Практическое применение дашборда
 
-#### 4.9.1 Сценарии использования
+#### 4.10.1 Сценарии использования
 
 1. **Экологический мониторинг городов:**
    - Отслеживание изменений качества воздуха
@@ -1054,7 +1161,7 @@ ORDER BY hour_of_day, sensor_type;
    - Планирование технического обслуживания
    - Оптимизация размещения новых сенсоров
 
-#### 4.9.2 Ключевые метрики для мониторинга
+#### 4.10.2 Ключевые метрики для мониторинга
 
 **Экологические KPI:**
 - Средний уровень PM2.5 за день/неделю/месяц
